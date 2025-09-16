@@ -114,6 +114,16 @@ def save_data(filename, data):
     except Exception as e:
         print(e)
 
+def get_latest_data():
+    """최신 데이터를 로드하는 함수"""
+    data = load_data(FILENAME)
+    items = []
+    for item in data.values():
+        items.append(item)
+    items.sort(key=lambda x: x["date"])
+    items = items[-30:]
+    return data, items
+
 def calc_average_total_score(items):
     if len(items) == 0:
         return 0
@@ -237,17 +247,8 @@ def calc_total_score(item):
     )
     return round(score / 8.5, 2)
 
-# 데이터 로드 부분을 함수로 만들어서 매번 최신 데이터를 가져오도록 수정
-
-def get_latest_data():
-    """최신 데이터를 로드하는 함수"""
-    data = load_data(FILENAME)
-    items = []
-    for item in data.values():
-        items.append(item)
-    items.sort(key=lambda x: x["date"])
-    items = items[-30:]
-    return data, items
+# 파일명 상수 정의
+FILENAME = "data.json"
 
 # 메인 화면 구성
 st.title("📱 감정 일기")
@@ -419,14 +420,46 @@ with tab1:
         else:
             st.info("💡 일기를 작성하면 AI가 감정을 분석해드려요!")
 
-# 통계와 그래프 탭에서도 최신 데이터 사용
 with tab2:
     st.subheader("📊 나의 감정 통계")
     
     # 최신 데이터 로드
     data, items = get_latest_data()
     
-    # 나머지 통계 코드는 동일...
+    if not items:
+        st.info("📝 아직 작성된 일기가 없습니다.\n첫 일기를 써보세요! ✨")
+    else:
+        # 주요 통계
+        average_total_score = calc_average_total_score(items)
+        item_count = len(items)
+        char_count = calc_char_count(items)
+        
+        # 통계 카드들
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("📈 평균 감정점수", f"{average_total_score}점")
+            st.metric("✏️ 총 글자수", f"{char_count:,}자")
+        with col2:
+            st.metric("📚 일기 개수", f"{item_count}개")
+            days_active = len(set([item["date"][:7] for item in items]))  # 활동한 월 수
+            st.metric("📅 활동 월수", f"{days_active}개월")
+        
+        st.divider()
+        
+        # 키워드 클라우드
+        st.write("🏷️ **자주 사용한 키워드 TOP 10**")
+        keyword_counts = calc_keyword_count(items)
+        if keyword_counts:
+            sorted_keywords = sorted(keyword_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+            
+            # 키워드를 크기별로 표시
+            for i, (keyword, count) in enumerate(sorted_keywords):
+                size = max(16 - i, 12)  # 순위가 높을수록 큰 글씨
+                if i < 3:  # 상위 3개는 메달 이모지
+                    medals = ["🥇", "🥈", "🥉"]
+                    st.markdown(f"### {medals[i]} **{keyword}** `{count}회`")
+                else:
+                    st.markdown(f"**{i+1}.** {keyword} `{count}회`")
 
 with tab3:
     st.subheader("📈 감정 변화 분석")
@@ -434,31 +467,64 @@ with tab3:
     # 최신 데이터 로드
     data, items = get_latest_data()
     
-    # 나머지 그래프 코드는 동일...
+    if not items:
+        st.info("📝 일기가 2개 이상 있어야 그래프를 볼 수 있어요!")
+    else:
+        # 감정 점수 트렌드
+        st.write("**🎯 감정 점수 변화**")
+        total_scores = []
+        for item in items[-14:]:  # 최근 14개만
+            total_scores.append({
+                "날짜": item["date"][5:],
+                "점수": item["total_score"],
+            })
+        st.line_chart(total_scores, x="날짜", y="점수", height=300)
+        
+        # 감정별 분석
+        st.write("**🎭 감정별 변화 (최근 2주)**")
+        emotion_scores = []
+        for item in items[-14:]:
+            emotion_scores.append({
+                "날짜": item["date"][5:],
+                "😄기쁨": item["joy"],
+                "😌평온": item["calmness"],
+                "😰불안": item["anxiety"],
+                "😢슬픔": item["sadness"],
+                "😡분노": item["anger"],
+            })
+        st.area_chart(
+            emotion_scores, x="날짜",
+            y=["😄기쁨", "😌평온", "😰불안", "😢슬픔", "😡분노"],
+            height=300
+        )
+        
+        # 감정 요약
+        if len(items) >= 7:
+            st.divider()
+            st.write("**📋 최근 일주일 감정 요약**")
+            
+            recent_week = items[-7:]
+            avg_emotions = {
+                "joy": sum(item["joy"] for item in recent_week) / 7,
+                "sadness": sum(item["sadness"] for item in recent_week) / 7,
+                "anger": sum(item["anger"] for item in recent_week) / 7,
+                "anxiety": sum(item["anxiety"] for item in recent_week) / 7,
+                "calmness": sum(item["calmness"] for item in recent_week) / 7,
+            }
+            
+            # 가장 높은 감정
+            max_emotion = max(avg_emotions, key=avg_emotions.get)
+            emotion_names = {
+                "joy": "😄 기쁨", "sadness": "😢 슬픔", "anger": "😡 분노",
+                "anxiety": "😰 불안", "calmness": "😌 평온"
+            }
+            
+            st.info(f"최근 일주일 동안 **{emotion_names[max_emotion]}**이 가장 높았어요! "
+                   f"({avg_emotions[max_emotion]:.1f}점)")
 
 # 하단 안내
 st.divider()
 st.markdown("### 💝 매일 감정을 기록하며 마음을 돌보세요!")
 st.caption("🤖 AI가 당신의 감정을 분석하고 응원 메시지를 보내드려요")
-
-# iOS에서 홈 화면 추가 안내 (첫 방문시에만)
-if 'show_install_guide' not in st.session_state:
-    st.session_state.show_install_guide = True
-
-if st.session_state.show_install_guide:
-    with st.expander("📱 아이폰 홈 화면에 추가하기"):
-        st.markdown("""
-        **앱처럼 사용하는 방법:**
-        1. Safari 하단의 공유 버튼 📤 터치
-        2. "홈 화면에 추가" 선택  
-        3. "추가" 버튼 터치
-        4. 홈 화면에서 앱처럼 사용! 🎉
-        """)
-        
-        if st.button("✅ 확인했어요"):
-            st.session_state.show_install_guide = False
-
-            st.rerun()
-
 
 
