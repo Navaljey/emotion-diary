@@ -255,14 +255,14 @@ tab1, tab2, tab3 = st.tabs(["✍️ 쓰기", "📊 통계", "📈 그래프"])
 
 # 일기 작성 부분 - 수정된 버전
 
+# 일기 작성 부분 - 삭제 기능이 포함된 수정 버전
+
 with tab1:
     st.subheader("오늘의 마음")
     
     # 세션 상태 초기화
     if 'selected_date' not in st.session_state:
         st.session_state.selected_date = datetime.now().date()
-    if 'clear_content' not in st.session_state:
-        st.session_state.clear_content = False
     
     selected_date = st.date_input(
         "📅 날짜", 
@@ -275,12 +275,9 @@ with tab1:
     default_content = ""
     total_score = None
     message = None
+    diary_exists = date_str in data
     
-    # 휴지통 버튼이 클릭되었을 때 내용을 지움
-    if st.session_state.clear_content:
-        default_content = ""
-        st.session_state.clear_content = False
-    elif date_str in data:
+    if diary_exists:
         default_content = data[date_str]["content"]
         total_score = data[date_str]["total_score"]
         message = data[date_str]["message"]
@@ -289,17 +286,46 @@ with tab1:
         "📝 오늘 하루는 어땠나요?", 
         default_content, 
         height=200,
-        placeholder="자유롭게 마음을 적어보세요...\n• 좋았던 일\n• 힘들었던 일\n• 느낀 감정들\n• 내일의 다짐",
-        key="diary_content"  # 고유 키 추가
+        placeholder="자유롭게 마음을 적어보세요...\n• 좋았던 일\n• 힘들었던 일\n• 느낀 감정들\n• 내일의 다짐"
     )
     
     col1, col2 = st.columns([3, 1])
     with col1:
         save_clicked = st.button("💾 저장하기", type="primary", use_container_width=True)
     with col2:
-        if st.button("🗑️", help="내용 지우기", key="clear_btn"):
-            st.session_state.clear_content = True
-            st.rerun()
+        # 일기가 존재할 때만 삭제 버튼 표시하고, 확인 후 삭제
+        if diary_exists:
+            delete_clicked = st.button("🗑️", help="일기 삭제하기")
+            if delete_clicked:
+                # 삭제 확인을 위한 세션 상태
+                if 'confirm_delete' not in st.session_state:
+                    st.session_state.confirm_delete = True
+                    st.rerun()
+        else:
+            # 일기가 없을 때는 내용만 지우는 버튼
+            if st.button("🗑️", help="내용 지우기"):
+                st.rerun()
+    
+    # 삭제 확인 다이얼로그
+    if 'confirm_delete' in st.session_state and st.session_state.confirm_delete:
+        st.warning("⚠️ 정말로 이 일기를 삭제하시겠습니까?")
+        col_yes, col_no = st.columns(2)
+        with col_yes:
+            if st.button("✅ 예, 삭제합니다", type="primary"):
+                # JSON 파일에서 해당 날짜 데이터 삭제
+                if date_str in data:
+                    del data[date_str]
+                    save_data(FILENAME, data)
+                    st.success("🗑️ 일기가 삭제되었습니다.")
+                    st.session_state.confirm_delete = False
+                    st.rerun()
+        with col_no:
+            if st.button("❌ 아니오, 취소"):
+                st.session_state.confirm_delete = False
+                st.rerun()
+        
+        # 확인 대화상자가 표시된 상태에서는 저장 기능 비활성화
+        save_clicked = False
     
     if save_clicked:
         if content.strip():
@@ -336,48 +362,47 @@ with tab1:
         else:
             st.warning("⚠️ 일기 내용을 입력해주세요!")
     
-    # 나머지 결과 표시 부분은 동일...
-    
-    # 결과 표시
-    st.divider()
-    
-    if total_score is not None:
-        # 점수에 따른 이모지와 색상
-        if total_score >= 8:
-            emoji, color = "😄", "green"
-        elif total_score >= 6:
-            emoji, color = "😊", "blue"  
-        elif total_score >= 4:
-            emoji, color = "😐", "orange"
-        elif total_score >= 2:
-            emoji, color = "😔", "red"
-        else:
-            emoji, color = "😢", "red"
-            
-        st.markdown(f"### 🎯 오늘의 감정 점수: **:{color}[{total_score}/10점]** {emoji}")
+    # 결과 표시 (삭제 확인 대화상자가 없을 때만)
+    if 'confirm_delete' not in st.session_state or not st.session_state.confirm_delete:
+        st.divider()
         
-        # 감정 분석 결과
-        if date_str in data:
-            item = data[date_str]
-            st.write("**🎭 세부 감정 분석:**")
-            emotion_cols = st.columns(5)
-            emotions = [
-                ("😄", "기쁨", item["joy"]),
-                ("😢", "슬픔", item["sadness"]), 
-                ("😡", "분노", item["anger"]),
-                ("😰", "불안", item["anxiety"]),
-                ("😌", "평온", item["calmness"])
-            ]
+        if total_score is not None:
+            # 점수에 따른 이모지와 색상
+            if total_score >= 8:
+                emoji, color = "😄", "green"
+            elif total_score >= 6:
+                emoji, color = "😊", "blue"  
+            elif total_score >= 4:
+                emoji, color = "😐", "orange"
+            elif total_score >= 2:
+                emoji, color = "😔", "red"
+            else:
+                emoji, color = "😢", "red"
+                
+            st.markdown(f"### 🎯 오늘의 감정 점수: **:{color}[{total_score}/10점]** {emoji}")
             
-            for i, (emoji, name, score) in enumerate(emotions):
-                with emotion_cols[i]:
-                    st.metric(f"{emoji} {name}", f"{score}")
-            
-            # AI 메시지
-            if message:
-                st.success(f"💌 **AI의 따뜻한 메시지**\n\n{message}")
-    else:
-        st.info("💡 일기를 작성하면 AI가 감정을 분석해드려요!")
+            # 감정 분석 결과
+            if date_str in data:
+                item = data[date_str]
+                st.write("**🎭 세부 감정 분석:**")
+                emotion_cols = st.columns(5)
+                emotions = [
+                    ("😄", "기쁨", item["joy"]),
+                    ("😢", "슬픔", item["sadness"]), 
+                    ("😡", "분노", item["anger"]),
+                    ("😰", "불안", item["anxiety"]),
+                    ("😌", "평온", item["calmness"])
+                ]
+                
+                for i, (emoji, name, score) in enumerate(emotions):
+                    with emotion_cols[i]:
+                        st.metric(f"{emoji} {name}", f"{score}")
+                
+                # AI 메시지
+                if message:
+                    st.success(f"💌 **AI의 따뜻한 메시지**\n\n{message}")
+        else:
+            st.info("💡 일기를 작성하면 AI가 감정을 분석해드려요!")
 
 with tab2:
     st.subheader("📊 나의 감정 통계")
@@ -498,4 +523,5 @@ if st.session_state.show_install_guide:
             st.session_state.show_install_guide = False
 
             st.rerun()
+
 
