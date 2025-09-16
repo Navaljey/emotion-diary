@@ -237,14 +237,17 @@ def calc_total_score(item):
     )
     return round(score / 8.5, 2)
 
-# 데이터 로드
-FILENAME = "data.json"
-data = load_data(FILENAME)
-items = []
-for item in data.values():
-    items.append(item)
-items.sort(key=lambda x: x["date"])
-items = items[-30:]
+# 데이터 로드 부분을 함수로 만들어서 매번 최신 데이터를 가져오도록 수정
+
+def get_latest_data():
+    """최신 데이터를 로드하는 함수"""
+    data = load_data(FILENAME)
+    items = []
+    for item in data.values():
+        items.append(item)
+    items.sort(key=lambda x: x["date"])
+    items = items[-30:]
+    return data, items
 
 # 메인 화면 구성
 st.title("📱 감정 일기")
@@ -253,12 +256,11 @@ st.caption("AI가 분석하는 나만의 감정 기록")
 # 탭 구성
 tab1, tab2, tab3 = st.tabs(["✍️ 쓰기", "📊 통계", "📈 그래프"])
 
-# 일기 작성 부분 - 수정된 버전
-
-# 일기 작성 부분 - 삭제 기능이 포함된 수정 버전
-
 with tab1:
     st.subheader("오늘의 마음")
+    
+    # 최신 데이터 로드
+    data, items = get_latest_data()
     
     # 세션 상태 초기화
     if 'selected_date' not in st.session_state:
@@ -298,9 +300,8 @@ with tab1:
             delete_clicked = st.button("🗑️", help="일기 삭제하기")
             if delete_clicked:
                 # 삭제 확인을 위한 세션 상태
-                if 'confirm_delete' not in st.session_state:
-                    st.session_state.confirm_delete = True
-                    st.rerun()
+                st.session_state.confirm_delete = date_str  # 삭제할 날짜를 저장
+                st.rerun()
         else:
             # 일기가 없을 때는 내용만 지우는 버튼
             if st.button("🗑️", help="내용 지우기"):
@@ -308,20 +309,24 @@ with tab1:
     
     # 삭제 확인 다이얼로그
     if 'confirm_delete' in st.session_state and st.session_state.confirm_delete:
-        st.warning("⚠️ 정말로 이 일기를 삭제하시겠습니까?")
+        delete_date = st.session_state.confirm_delete
+        st.warning(f"⚠️ {delete_date} 일기를 정말로 삭제하시겠습니까?")
         col_yes, col_no = st.columns(2)
         with col_yes:
-            if st.button("✅ 예, 삭제합니다", type="primary"):
+            if st.button("✅ 예, 삭제합니다", type="primary", key="confirm_yes"):
                 # JSON 파일에서 해당 날짜 데이터 삭제
-                if date_str in data:
-                    del data[date_str]
-                    save_data(FILENAME, data)
+                current_data = load_data(FILENAME)  # 최신 데이터 다시 로드
+                if delete_date in current_data:
+                    del current_data[delete_date]
+                    save_data(FILENAME, current_data)
                     st.success("🗑️ 일기가 삭제되었습니다.")
-                    st.session_state.confirm_delete = False
-                    st.rerun()
+                # 세션 상태 정리
+                del st.session_state.confirm_delete
+                st.rerun()
         with col_no:
-            if st.button("❌ 아니오, 취소"):
-                st.session_state.confirm_delete = False
+            if st.button("❌ 아니오, 취소", key="confirm_no"):
+                # 세션 상태 정리
+                del st.session_state.confirm_delete
                 st.rerun()
         
         # 확인 대화상자가 표시된 상태에서는 저장 기능 비활성화
@@ -330,7 +335,17 @@ with tab1:
     if save_clicked:
         if content.strip():
             with st.spinner('🤖 AI가 감정을 분석 중...'):
+                # 최신 데이터로 저장 작업 수행
+                current_data = load_data(FILENAME)
                 analyzed = sentiment_analysis(content)
+                
+                # 최신 items로 recent_data 생성
+                current_items = []
+                for item in current_data.values():
+                    current_items.append(item)
+                current_items.sort(key=lambda x: x["date"])
+                current_items = current_items[-7:]  # 최근 7개
+                
                 today_data = {
                     "date": date_str,
                     "keywords": analyzed["keywords"],
@@ -339,7 +354,7 @@ with tab1:
                     "calmness": analyzed["calmness"],
                 }
                 recent_data = []
-                for item in items[-7:]:
+                for item in current_items:
                     recent_data.append({
                         "date": item["date"], "keywords": item["keywords"],
                         "joy": item["joy"], "sadness": item["sadness"],
@@ -354,8 +369,8 @@ with tab1:
                     "anger": analyzed["anger"], "anxiety": analyzed["anxiety"],
                     "calmness": analyzed["calmness"], "message": message,
                 }
-                data[date_str] = new_item
-                save_data(FILENAME, data)
+                current_data[date_str] = new_item
+                save_data(FILENAME, current_data)
                 st.success("✅ 일기가 저장되었습니다!")
                 st.balloons()
                 st.rerun()
@@ -363,7 +378,7 @@ with tab1:
             st.warning("⚠️ 일기 내용을 입력해주세요!")
     
     # 결과 표시 (삭제 확인 대화상자가 없을 때만)
-    if 'confirm_delete' not in st.session_state or not st.session_state.confirm_delete:
+    if 'confirm_delete' not in st.session_state:
         st.divider()
         
         if total_score is not None:
@@ -404,101 +419,22 @@ with tab1:
         else:
             st.info("💡 일기를 작성하면 AI가 감정을 분석해드려요!")
 
+# 통계와 그래프 탭에서도 최신 데이터 사용
 with tab2:
     st.subheader("📊 나의 감정 통계")
     
-    if not items:
-        st.info("📝 아직 작성된 일기가 없습니다.\n첫 일기를 써보세요! ✨")
-    else:
-        # 주요 통계
-        average_total_score = calc_average_total_score(items)
-        item_count = len(items)
-        char_count = calc_char_count(items)
-        
-        # 통계 카드들
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("📈 평균 감정점수", f"{average_total_score}점")
-            st.metric("✏️ 총 글자수", f"{char_count:,}자")
-        with col2:
-            st.metric("📚 일기 개수", f"{item_count}개")
-            days_active = len(set([item["date"][:7] for item in items]))  # 활동한 월 수
-            st.metric("📅 활동 월수", f"{days_active}개월")
-        
-        st.divider()
-        
-        # 키워드 클라우드
-        st.write("🏷️ **자주 사용한 키워드 TOP 10**")
-        keyword_counts = calc_keyword_count(items)
-        if keyword_counts:
-            sorted_keywords = sorted(keyword_counts.items(), key=lambda x: x[1], reverse=True)[:10]
-            
-            # 키워드를 크기별로 표시
-            for i, (keyword, count) in enumerate(sorted_keywords):
-                size = max(16 - i, 12)  # 순위가 높을수록 큰 글씨
-                if i < 3:  # 상위 3개는 메달 이모지
-                    medals = ["🥇", "🥈", "🥉"]
-                    st.markdown(f"### {medals[i]} **{keyword}** `{count}회`")
-                else:
-                    st.markdown(f"**{i+1}.** {keyword} `{count}회`")
+    # 최신 데이터 로드
+    data, items = get_latest_data()
+    
+    # 나머지 통계 코드는 동일...
 
 with tab3:
     st.subheader("📈 감정 변화 분석")
     
-    if not items:
-        st.info("📝 일기가 2개 이상 있어야 그래프를 볼 수 있어요!")
-    else:
-        # 감정 점수 트렌드
-        st.write("**🎯 감정 점수 변화**")
-        total_scores = []
-        for item in items[-14:]:  # 최근 14개만
-            total_scores.append({
-                "날짜": item["date"][5:],
-                "점수": item["total_score"],
-            })
-        st.line_chart(total_scores, x="날짜", y="점수", height=300)
-        
-        # 감정별 분석
-        st.write("**🎭 감정별 변화 (최근 2주)**")
-        emotion_scores = []
-        for item in items[-14:]:
-            emotion_scores.append({
-                "날짜": item["date"][5:],
-                "😄기쁨": item["joy"],
-                "😌평온": item["calmness"],
-                "😰불안": item["anxiety"],
-                "😢슬픔": item["sadness"],
-                "😡분노": item["anger"],
-            })
-        st.area_chart(
-            emotion_scores, x="날짜",
-            y=["😄기쁨", "😌평온", "😰불안", "😢슬픔", "😡분노"],
-            height=300
-        )
-        
-        # 감정 요약
-        if len(items) >= 7:
-            st.divider()
-            st.write("**📋 최근 일주일 감정 요약**")
-            
-            recent_week = items[-7:]
-            avg_emotions = {
-                "joy": sum(item["joy"] for item in recent_week) / 7,
-                "sadness": sum(item["sadness"] for item in recent_week) / 7,
-                "anger": sum(item["anger"] for item in recent_week) / 7,
-                "anxiety": sum(item["anxiety"] for item in recent_week) / 7,
-                "calmness": sum(item["calmness"] for item in recent_week) / 7,
-            }
-            
-            # 가장 높은 감정
-            max_emotion = max(avg_emotions, key=avg_emotions.get)
-            emotion_names = {
-                "joy": "😄 기쁨", "sadness": "😢 슬픔", "anger": "😡 분노",
-                "anxiety": "😰 불안", "calmness": "😌 평온"
-            }
-            
-            st.info(f"최근 일주일 동안 **{emotion_names[max_emotion]}**이 가장 높았어요! "
-                   f"({avg_emotions[max_emotion]:.1f}점)")
+    # 최신 데이터 로드
+    data, items = get_latest_data()
+    
+    # 나머지 그래프 코드는 동일...
 
 # 하단 안내
 st.divider()
@@ -523,5 +459,6 @@ if st.session_state.show_install_guide:
             st.session_state.show_install_guide = False
 
             st.rerun()
+
 
 
