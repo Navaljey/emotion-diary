@@ -253,12 +253,16 @@ st.caption("AI가 분석하는 나만의 감정 기록")
 # 탭 구성
 tab1, tab2, tab3 = st.tabs(["✍️ 쓰기", "📊 통계", "📈 그래프"])
 
+# 일기 작성 부분 - 수정된 버전
+
 with tab1:
     st.subheader("오늘의 마음")
     
     # 세션 상태 초기화
     if 'selected_date' not in st.session_state:
         st.session_state.selected_date = datetime.now().date()
+    if 'clear_content' not in st.session_state:
+        st.session_state.clear_content = False
     
     selected_date = st.date_input(
         "📅 날짜", 
@@ -271,7 +275,12 @@ with tab1:
     default_content = ""
     total_score = None
     message = None
-    if date_str in data:
+    
+    # 휴지통 버튼이 클릭되었을 때 내용을 지움
+    if st.session_state.clear_content:
+        default_content = ""
+        st.session_state.clear_content = False
+    elif date_str in data:
         default_content = data[date_str]["content"]
         total_score = data[date_str]["total_score"]
         message = data[date_str]["message"]
@@ -280,14 +289,16 @@ with tab1:
         "📝 오늘 하루는 어땠나요?", 
         default_content, 
         height=200,
-        placeholder="자유롭게 마음을 적어보세요...\n• 좋았던 일\n• 힘들었던 일\n• 느낀 감정들\n• 내일의 다짐"
+        placeholder="자유롭게 마음을 적어보세요...\n• 좋았던 일\n• 힘들었던 일\n• 느낀 감정들\n• 내일의 다짐",
+        key="diary_content"  # 고유 키 추가
     )
     
     col1, col2 = st.columns([3, 1])
     with col1:
         save_clicked = st.button("💾 저장하기", type="primary", use_container_width=True)
     with col2:
-        if st.button("🗑️", help="내용 지우기"):
+        if st.button("🗑️", help="내용 지우기", key="clear_btn"):
+            st.session_state.clear_content = True
             st.rerun()
     
     if save_clicked:
@@ -324,6 +335,8 @@ with tab1:
                 st.rerun()
         else:
             st.warning("⚠️ 일기 내용을 입력해주세요!")
+    
+    # 나머지 결과 표시 부분은 동일...
     
     # 결과 표시
     st.divider()
@@ -485,3 +498,4 @@ if st.session_state.show_install_guide:
             st.session_state.show_install_guide = False
 
             st.rerun()
+
