@@ -6,24 +6,9 @@ import streamlit as st
 from dotenv import load_dotenv, find_dotenv
 import google.generativeai as genai
 
-# PWA를 위한 HTML 코드
+# PWA를 위한 HTML 코드 - 수정된 버전
 pwa_html = """
-<link rel="manifest" href="data:application/json;charset=utf-8,{
-  'name': '감정 일기',
-  'short_name': '감정일기',
-  'description': 'AI가 분석하는 감정 일기 앱',
-  'start_url': '/',
-  'display': 'standalone',
-  'background_color': '#ffffff',
-  'theme_color': '#ff6b6b',
-  'icons': [
-    {
-      'src': 'data:image/svg+xml;charset=utf-8,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><text y=\".9em\" font-size=\"90\">✍️</text></svg>',
-      'sizes': '192x192',
-      'type': 'image/svg+xml'
-    }
-  ]
-}">
+<link rel="manifest" href="data:application/json;charset=utf-8,%7B%22name%22%3A%22%EA%B0%90%EC%A0%95%20%EC%9D%BC%EA%B8%B0%22%2C%22short_name%22%3A%22%EA%B0%90%EC%A0%95%EC%9D%BC%EA%B8%B0%22%2C%22description%22%3A%22AI%EA%B0%80%20%EB%B6%84%EC%84%9D%ED%95%98%EB%8A%94%20%EA%B0%90%EC%A0%95%20%EC%9D%BC%EA%B8%B0%20%EC%95%B1%22%2C%22start_url%22%3A%22%2F%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%23ffffff%22%2C%22theme_color%22%3A%22%23ff6b6b%22%2C%22icons%22%3A%5B%7B%22src%22%3A%22data%3Aimage%2Fsvg%2Bxml%3Bcharset%3Dutf-8%2C%253Csvg%2520xmlns%253D%2522http%253A%252F%252Fwww.w3.org%252F2000%252Fsvg%2522%2520viewBox%253D%25220%25200%2520100%2520100%2522%253E%253Ctext%2520y%253D%2522.9em%2522%2520font-size%253D%252290%2522%253E%25E2%259C%258D%25EF%25B8%258F%253C%252Ftext%253E%253C%252Fsvg%253E%22%2C%22sizes%22%3A%22192x192%22%2C%22type%22%3A%22image%2Fsvg%2Bxml%22%7D%5D%7D">
 
 <script>
 if ('serviceWorker' in navigator) {
@@ -498,4 +483,5 @@ if st.session_state.show_install_guide:
         
         if st.button("✅ 확인했어요"):
             st.session_state.show_install_guide = False
+
             st.rerun()
