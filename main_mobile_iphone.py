@@ -98,30 +98,82 @@ else:
     st.error("🔑 GEMINI_API_KEY가 설정되지 않았습니다. .env 파일을 확인해주세요.")
     st.stop()
 
+# 파일명 상수 정의 - 절대경로 사용
+FILENAME = os.path.abspath("emotion_diary_data.json")
+
 def load_data(filename):
-    data = None
+    """데이터 로드 함수 - 에러 처리 강화"""
+    data = {}
     try:
-        with open(filename, "r", encoding="utf-8") as file:
-            data = json.load(file)
-    except:
-        data = {}
+        # 파일이 존재하는지 먼저 확인
+        if os.path.exists(filename):
+            with open(filename, "r", encoding="utf-8") as file:
+                content = file.read().strip()
+                if content:  # 파일이 비어있지 않은 경우만
+                    data = json.loads(content)
+                else:
+                    print(f"파일이 비어있음: {filename}")
+        else:
+            print(f"파일이 존재하지 않음: {filename}")
+    except json.JSONDecodeError as e:
+        print(f"JSON 디코드 에러: {e}")
+        # 백업 파일 확인
+        backup_filename = filename + ".backup"
+        if os.path.exists(backup_filename):
+            try:
+                with open(backup_filename, "r", encoding="utf-8") as file:
+                    data = json.load(file)
+                print("백업 파일에서 데이터 복구 완료")
+            except:
+                print("백업 파일도 손상됨")
+    except Exception as e:
+        print(f"데이터 로드 에러: {e}")
+    
     return data
 
 def save_data(filename, data):
+    """데이터 저장 함수 - 백업 기능 추가"""
     try:
+        # 기존 파일이 있으면 백업 생성
+        if os.path.exists(filename):
+            backup_filename = filename + ".backup"
+            import shutil
+            shutil.copy2(filename, backup_filename)
+        
+        # 데이터 저장
         with open(filename, "w", encoding="utf-8") as file:
             json.dump(data, file, indent=4, ensure_ascii=False)
+        
+        # 저장 확인
+        if os.path.exists(filename):
+            print(f"데이터 저장 완료: {filename}")
+        else:
+            print(f"데이터 저장 실패: {filename}")
+            
     except Exception as e:
-        print(e)
+        print(f"데이터 저장 에러: {e}")
+        st.error(f"데이터 저장 중 오류가 발생했습니다: {e}")
 
 def get_latest_data():
-    """최신 데이터를 로드하는 함수"""
+    """최신 데이터를 로드하는 함수 - 디버깅 정보 추가"""
     data = load_data(FILENAME)
+    
+    # 디버깅 정보
+    if data:
+        print(f"로드된 일기 개수: {len(data)}")
+        dates = sorted(data.keys())
+        if dates:
+            print(f"가장 오래된 일기: {dates[0]}")
+            print(f"가장 최근 일기: {dates[-1]}")
+    else:
+        print("로드된 데이터가 없음")
+    
     items = []
     for item in data.values():
         items.append(item)
     items.sort(key=lambda x: x["date"])
-    items = items[-30:]
+    items = items[-30:]  # 최근 30개만
+    
     return data, items
 
 def calc_average_total_score(items):
@@ -247,12 +299,19 @@ def calc_total_score(item):
     )
     return round(score / 8.5, 2)
 
-# 파일명 상수 정의
-FILENAME = "data.json"
-
 # 메인 화면 구성
 st.title("📱 감정 일기")
 st.caption("AI가 분석하는 나만의 감정 기록")
+
+# 디버깅 정보 (개발 중에만 표시)
+if st.sidebar.checkbox("🔧 디버깅 정보"):
+    st.sidebar.write(f"**파일 경로:** {FILENAME}")
+    st.sidebar.write(f"**파일 존재:** {os.path.exists(FILENAME)}")
+    if os.path.exists(FILENAME):
+        file_size = os.path.getsize(FILENAME)
+        st.sidebar.write(f"**파일 크기:** {file_size} bytes")
+        file_time = os.path.getmtime(FILENAME)
+        st.sidebar.write(f"**최종 수정:** {datetime.fromtimestamp(file_time)}")
 
 # 탭 구성
 tab1, tab2, tab3 = st.tabs(["✍️ 쓰기", "📊 통계", "📈 그래프"])
@@ -284,6 +343,12 @@ with tab1:
         default_content = data[date_str]["content"]
         total_score = data[date_str]["total_score"]
         message = data[date_str]["message"]
+    
+    # 데이터 로드 상태 표시
+    if data:
+        st.success(f"✅ {len(data)}개의 일기가 로드되었습니다")
+    else:
+        st.info("📝 저장된 일기가 없습니다. 첫 일기를 써보세요!")
     
     content = st.text_area(
         "📝 오늘 하루는 어땠나요?", 
@@ -527,4 +592,20 @@ st.divider()
 st.markdown("### 💝 매일 감정을 기록하며 마음을 돌보세요!")
 st.caption("🤖 AI가 당신의 감정을 분석하고 응원 메시지를 보내드려요")
 
+# iOS에서 홈 화면 추가 안내 (첫 방문시에만)
+if 'show_install_guide' not in st.session_state:
+    st.session_state.show_install_guide = True
 
+if st.session_state.show_install_guide:
+    with st.expander("📱 아이폰 홈 화면에 추가하기"):
+        st.markdown("""
+        **앱처럼 사용하는 방법:**
+        1. Safari 하단의 공유 버튼 📤 터치
+        2. "홈 화면에 추가" 선택  
+        3. "추가" 버튼 터치
+        4. 홈 화면에서 앱처럼 사용! 🎉
+        """)
+        
+        if st.button("✅ 확인했어요"):
+            st.session_state.show_install_guide = False
+            st.rerun()
