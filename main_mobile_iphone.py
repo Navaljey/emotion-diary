@@ -592,20 +592,3 @@ st.divider()
 st.markdown("### 💝 매일 감정을 기록하며 마음을 돌보세요!")
 st.caption("🤖 AI가 당신의 감정을 분석하고 응원 메시지를 보내드려요")
 
-# iOS에서 홈 화면 추가 안내 (첫 방문시에만)
-if 'show_install_guide' not in st.session_state:
-    st.session_state.show_install_guide = True
-
-if st.session_state.show_install_guide:
-    with st.expander("📱 아이폰 홈 화면에 추가하기"):
-        st.markdown("""
-        **앱처럼 사용하는 방법:**
-        1. Safari 하단의 공유 버튼 📤 터치
-        2. "홈 화면에 추가" 선택  
-        3. "추가" 버튼 터치
-        4. 홈 화면에서 앱처럼 사용! 🎉
-        """)
-        
-        if st.button("✅ 확인했어요"):
-            st.session_state.show_install_guide = False
-            st.rerun()
