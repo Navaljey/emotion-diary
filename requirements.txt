@@ -1,6 +1,7 @@
-streamlit
+streamlit>=1.28.0
 google-generativeai
-gspread
+gspread>=5.11.0
 oauth2client
 python-dotenv
+pandas
 
