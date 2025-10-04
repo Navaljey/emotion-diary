@@ -242,9 +242,14 @@ def calc_keyword_count(items):
 
 def gemini_chat(prompt):
     try:
+        st.info("🤖 Gemini API 호출 중...")
         response = model.generate_content(prompt)
+        st.success("✅ Gemini API 응답 받음")
         return response.text
     except Exception as e:
+        st.error(f"❌ Gemini API 오류: {e}")
+        import traceback
+        st.error(f"상세:\n```\n{traceback.format_exc()}\n```")
         return None
 
 def sentiment_analysis(content):
@@ -264,14 +269,28 @@ def sentiment_analysis(content):
     }}
     """
     
+    st.info("📊 감정 분석 시작...")
     try:
         response_text = gemini_chat(prompt)
         if response_text:
+            st.info(f"📝 Gemini 응답 (처음 100자): {response_text[:100]}...")
             start = response_text.find('{')
             end = response_text.rfind('}') + 1
-            return json.loads(response_text[start:end])
-    except:
-        pass
+            if start >= 0 and end > start:
+                json_text = response_text[start:end]
+                st.info(f"🔍 추출된 JSON: {json_text[:100]}...")
+                result = json.loads(json_text)
+                st.success("✅ 감정 분석 완료!")
+                return result
+            else:
+                st.warning("⚠️ JSON 형식을 찾을 수 없음")
+    except Exception as e:
+        st.error(f"❌ 분석 오류: {e}")
+        import traceback
+        st.error(traceback.format_exc())
+    
+    # 기본값 반환
+    st.warning("⚠️ 기본 감정 점수 사용")
     return {"keywords": ["일기", "오늘", "하루", "생각", "마음"],
             "joy": 5, "sadness": 3, "anger": 2, "anxiety": 3, "calmness": 4}
 
@@ -283,15 +302,19 @@ def generate_message(today_data, recent_data):
     형식: {{"message": "응원 메시지 😊"}}
     """
     
+    st.info("💌 응원 메시지 생성 중...")
     try:
         response_text = gemini_chat(prompt)
         if response_text:
             start = response_text.find('{')
             end = response_text.rfind('}') + 1
-            data = json.loads(response_text[start:end])
-            return data["message"]
-    except:
-        pass
+            if start >= 0 and end > start:
+                data = json.loads(response_text[start:end])
+                st.success("✅ 메시지 생성 완료!")
+                return data["message"]
+    except Exception as e:
+        st.warning(f"⚠️ 메시지 생성 실패: {e}")
+    
     return "오늘도 일기를 써주셔서 감사해요! 😊"
 
 def calc_total_score(item):
@@ -302,39 +325,6 @@ def calc_total_score(item):
 # 메인 화면
 st.title("📱 감정 일기")
 st.caption("AI가 분석하는 나만의 감정 기록 ☁️")
-
-# 🔧 디버깅 패널 (문제 해결 후 제거 가능)
-with st.expander("🔧 디버깅 정보 (문제 해결용)"):
-    try:
-        # Google Sheets 연결 상태
-        st.write("**📊 Google Sheets 상태:**")
-        sheet_data = worksheet.get_all_values()
-        st.write(f"- 총 행 수: {len(sheet_data)}")
-        st.write(f"- 헤더: {sheet_data[0] if sheet_data else '없음'}")
-        st.write(f"- 데이터 행 수: {len(sheet_data) - 1 if sheet_data else 0}")
-        
-        # 최근 3개 행 표시
-        if len(sheet_data) > 1:
-            st.write("**최근 데이터 (최대 3개):**")
-            for i, row in enumerate(sheet_data[-3:], 1):
-                st.write(f"{i}. 날짜: {row[0] if len(row) > 0 else 'N/A'}, 내용 길이: {len(row[1]) if len(row) > 1 else 0}자")
-        
-        # 로드된 데이터 확인
-        loaded_data, loaded_items = get_latest_data()
-        st.write(f"**💾 로드된 일기:** {len(loaded_data)}개")
-        if loaded_data:
-            st.write(f"- 날짜 목록: {list(loaded_data.keys())}")
-        
-        # Secrets 확인 (민감 정보는 제외)
-        st.write("**🔑 Secrets 상태:**")
-        st.write(f"- GEMINI_API_KEY: {'✅ 설정됨' if GEMINI_API_KEY else '❌ 없음'}")
-        st.write(f"- SPREADSHEET_ID: {'✅ 설정됨' if st.secrets.get('SPREADSHEET_ID') else '❌ 없음'}")
-        st.write(f"- gcp_service_account: {'✅ 설정됨' if st.secrets.get('gcp_service_account') else '❌ 없음'}")
-        
-    except Exception as e:
-        st.error(f"디버깅 정보 로드 오류: {e}")
-        import traceback
-        st.code(traceback.format_exc())
 
 tab1, tab2, tab3 = st.tabs(["✍️ 쓰기", "📊 통계", "📈 그래프"])
 
