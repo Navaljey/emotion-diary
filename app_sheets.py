@@ -113,9 +113,12 @@ def init_google_sheets():
 worksheet = init_google_sheets()
 
 def load_data_from_sheets():
-    """Google Sheets에서 데이터 로드"""
+    """Google Sheets에서 데이터 로드 (디버깅 추가)"""
     try:
+        st.sidebar.info("🔄 데이터 로딩 중...")
         records = worksheet.get_all_records()
+        st.sidebar.success(f"📥 {len(records)}개 레코드 로드됨")
+        
         data = {}
         for record in records:
             if record.get('date'):
@@ -138,38 +141,72 @@ def load_data_from_sheets():
                     'calmness': int(record.get('calmness', 0)),
                     'message': record.get('message', '')
                 }
+        
+        st.sidebar.success(f"✅ {len(data)}개 일기 로드 완료")
         return data
     except Exception as e:
-        st.error(f"데이터 로드 오류: {e}")
+        st.sidebar.error(f"로드 오류: {e}")
+        import traceback
+        st.sidebar.error(traceback.format_exc())
         return {}
 
 def save_data_to_sheets(date_str, item_data):
-    """Google Sheets에 데이터 저장"""
+    """Google Sheets에 데이터 저장 (디버깅 추가)"""
     try:
+        st.info(f"🔄 저장 시도: {date_str}")
+        
+        # 현재 데이터 확인
         all_values = worksheet.get_all_values()
+        st.info(f"📊 현재 시트 행 수: {len(all_values)}")
+        
         row_index = None
         
+        # 기존 데이터 찾기
         for idx, row in enumerate(all_values[1:], start=2):
-            if row[0] == date_str:
+            if len(row) > 0 and row[0] == date_str:
                 row_index = idx
+                st.info(f"📝 기존 데이터 발견: {row_index}행")
                 break
         
+        # 데이터 준비
         keywords_str = json.dumps(item_data['keywords'], ensure_ascii=False)
         row_data = [
-            date_str, item_data['content'], keywords_str, item_data['total_score'],
-            item_data['joy'], item_data['sadness'], item_data['anger'],
-            item_data['anxiety'], item_data['calmness'], item_data['message'],
+            str(date_str), 
+            str(item_data['content']), 
+            str(keywords_str), 
+            float(item_data['total_score']),
+            int(item_data['joy']), 
+            int(item_data['sadness']), 
+            int(item_data['anger']),
+            int(item_data['anxiety']), 
+            int(item_data['calmness']), 
+            str(item_data['message']),
             datetime.now().isoformat()
         ]
         
+        st.info(f"💾 저장할 데이터: {row_data[:3]}...")  # 일부만 표시
+        
+        # 저장 실행
         if row_index:
+            # 기존 행 업데이트
             worksheet.update(f'A{row_index}:K{row_index}', [row_data])
+            st.success(f"✅ {row_index}행 업데이트 완료!")
         else:
+            # 새 행 추가
             worksheet.append_row(row_data)
+            st.success(f"✅ 새 행 추가 완료!")
+        
+        # 저장 확인
+        import time
+        time.sleep(1)  # API 반영 대기
+        updated_values = worksheet.get_all_values()
+        st.success(f"🎉 저장 후 시트 행 수: {len(updated_values)}")
         
         return True
     except Exception as e:
-        st.error(f"저장 오류: {e}")
+        st.error(f"❌ 저장 오류: {e}")
+        import traceback
+        st.error(f"상세 오류:\n```\n{traceback.format_exc()}\n```")
         return False
 
 def delete_data_from_sheets(date_str):
@@ -265,6 +302,39 @@ def calc_total_score(item):
 # 메인 화면
 st.title("📱 감정 일기")
 st.caption("AI가 분석하는 나만의 감정 기록 ☁️")
+
+# 🔧 디버깅 패널 (문제 해결 후 제거 가능)
+with st.expander("🔧 디버깅 정보 (문제 해결용)"):
+    try:
+        # Google Sheets 연결 상태
+        st.write("**📊 Google Sheets 상태:**")
+        sheet_data = worksheet.get_all_values()
+        st.write(f"- 총 행 수: {len(sheet_data)}")
+        st.write(f"- 헤더: {sheet_data[0] if sheet_data else '없음'}")
+        st.write(f"- 데이터 행 수: {len(sheet_data) - 1 if sheet_data else 0}")
+        
+        # 최근 3개 행 표시
+        if len(sheet_data) > 1:
+            st.write("**최근 데이터 (최대 3개):**")
+            for i, row in enumerate(sheet_data[-3:], 1):
+                st.write(f"{i}. 날짜: {row[0] if len(row) > 0 else 'N/A'}, 내용 길이: {len(row[1]) if len(row) > 1 else 0}자")
+        
+        # 로드된 데이터 확인
+        loaded_data, loaded_items = get_latest_data()
+        st.write(f"**💾 로드된 일기:** {len(loaded_data)}개")
+        if loaded_data:
+            st.write(f"- 날짜 목록: {list(loaded_data.keys())}")
+        
+        # Secrets 확인 (민감 정보는 제외)
+        st.write("**🔑 Secrets 상태:**")
+        st.write(f"- GEMINI_API_KEY: {'✅ 설정됨' if GEMINI_API_KEY else '❌ 없음'}")
+        st.write(f"- SPREADSHEET_ID: {'✅ 설정됨' if st.secrets.get('SPREADSHEET_ID') else '❌ 없음'}")
+        st.write(f"- gcp_service_account: {'✅ 설정됨' if st.secrets.get('gcp_service_account') else '❌ 없음'}")
+        
+    except Exception as e:
+        st.error(f"디버깅 정보 로드 오류: {e}")
+        import traceback
+        st.code(traceback.format_exc())
 
 tab1, tab2, tab3 = st.tabs(["✍️ 쓰기", "📊 통계", "📈 그래프"])
 
