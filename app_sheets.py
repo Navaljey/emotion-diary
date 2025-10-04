@@ -62,7 +62,8 @@ _ = load_dotenv(find_dotenv())
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or st.secrets.get("GEMINI_API_KEY", "")
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    # 올바른 모델 이름 사용
+    model = genai.GenerativeModel('gemini-pro')
 else:
     st.error("🔑 GEMINI_API_KEY가 설정되지 않았습니다.")
     st.stop()
