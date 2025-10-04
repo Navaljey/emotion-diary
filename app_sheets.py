@@ -561,7 +561,58 @@ with tab3:
         
         st.area_chart(
             emotion_scores, x="날짜",
-            y=["😄기쁨", "😌평온", "😰불안", "😢
+            y=["😄기쁨", "😌평온", "😰불안", "😢슬픔", "😡분노"],
+            height=300
+        )
+        
+        if len(items) >= 7:
+            st.divider()
+            st.write("**📋 최근 일주일 감정 요약**")
+            
+            recent_week = items[-7:]
+            avg_emotions = {
+                "joy": sum(item["joy"] for item in recent_week) / 7,
+                "sadness": sum(item["sadness"] for item in recent_week) / 7,
+                "anger": sum(item["anger"] for item in recent_week) / 7,
+                "anxiety": sum(item["anxiety"] for item in recent_week) / 7,
+                "calmness": sum(item["calmness"] for item in recent_week) / 7,
+            }
+            
+            max_emotion = max(avg_emotions, key=avg_emotions.get)
+            emotion_names = {
+                "joy": "😄 기쁨", "sadness": "😢 슬픔", "anger": "😡 분노",
+                "anxiety": "😰 불안", "calmness": "😌 평온"
+            }
+            
+            st.info(f"최근 일주일 동안 **{emotion_names[max_emotion]}**이 가장 높았어요! "
+                   f"({avg_emotions[max_emotion]:.1f}점)")
 
+# 하단 안내
+st.divider()
+st.markdown("### 💝 매일 감정을 기록하며 마음을 돌보세요!")
+st.caption("🤖 AI가 당신의 감정을 분석하고 응원 메시지를 보내드려요")
+st.caption("☁️ 모든 데이터는 Google Sheets에 안전하게 보관됩니다")
 
+# iOS 홈 화면 추가 안내
+if 'show_install_guide' not in st.session_state:
+    st.session_state.show_install_guide = True
+
+if st.session_state.show_install_guide:
+    with st.expander("📱 아이폰 홈 화면에 추가하기"):
+        st.markdown("""
+        **앱처럼 사용하는 방법:**
+        1. Safari 하단의 공유 버튼 📤 터치
+        2. "홈 화면에 추가" 선택  
+        3. "추가" 버튼 터치
+        4. 홈 화면에서 앱처럼 사용! 🎉
+        
+        **☁️ 클라우드 저장 장점:**
+        - 언제 어디서나 접속 가능
+        - 데이터 영구 보관
+        - 자동 백업
+        """)
+        
+        if st.button("✅ 확인했어요"):
+            st.session_state.show_install_guide = False
+            st.rerun()
 
