@@ -62,8 +62,29 @@ _ = load_dotenv(find_dotenv())
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or st.secrets.get("GEMINI_API_KEY", "")
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
-    # 올바른 모델 이름 사용
-    model = genai.GenerativeModel('gemini-pro')
+    
+    # 🔍 사용 가능한 모델 확인 (디버깅)
+    st.sidebar.markdown("### 🔍 사용 가능한 Gemini 모델")
+    available_models = []
+    try:
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                available_models.append(m.name)
+                st.sidebar.success(f"✅ {m.name}")
+        
+        if not available_models:
+            st.sidebar.warning("⚠️ 사용 가능한 모델이 없습니다")
+    except Exception as e:
+        st.sidebar.error(f"❌ 모델 목록 조회 오류: {e}")
+    
+    # 첫 번째 사용 가능한 모델 선택
+    if available_models:
+        model_name = available_models[0].replace('models/', '')
+        st.sidebar.info(f"📌 사용 중인 모델: {model_name}")
+        model = genai.GenerativeModel(model_name)
+    else:
+        st.error("❌ 사용 가능한 Gemini 모델이 없습니다. API 키를 확인해주세요.")
+        st.stop()
 else:
     st.error("🔑 GEMINI_API_KEY가 설정되지 않았습니다.")
     st.stop()
@@ -511,3 +532,4 @@ with tab3:
 st.divider()
 st.markdown("### 💝 매일 감정을 기록하며 마음을 돌보세요!")
 st.caption("🤖 AI가 감정을 분석하고 ☁️ 클라우드에 안전하게 보관합니다")
+
