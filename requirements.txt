@@ -2,8 +2,7 @@ streamlit
 google-generativeai
 gspread
 google-auth
-python-dotenv
 matplotlib
 networkx
-numpy
+python-dotenv
 
