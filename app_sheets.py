@@ -356,7 +356,8 @@ with tab4:
         st.divider()
         st.warning("⚠️ **주의사항**: 이 조언은 AI가 생성한 것으로 참고용입니다. 전문적인 상담이나 치료가 필요한 경우 반드시 해당 분야 전문가와 상담하세요.")
 
-st.divider()import json
+st.divider()
+import json
 import os
 from datetime import datetime
 import streamlit as st
@@ -1396,6 +1397,7 @@ with tab4:
 st.divider()
 st.markdown("### 💝 매일 감정을 기록하며 마음을 돌보세요!")
 st.caption("🤖 AI가 감정을 분석하고 ☁️ 클라우드에 안전하게 보관합니다")
+
 
 
 
