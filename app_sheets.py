@@ -1,4 +1,362 @@
-import json
+with tab4:
+    st.subheader("👨‍⚕️ 전문가 조언")
+    st.caption("일기 내용을 시간순으로 분석하여 전문가 관점의 조언을 제공합니다")
+    
+    data, items = get_latest_data()
+    
+    if not items:
+        st.info("📝 일기를 작성하면 전문가 조언을 받을 수 있습니다.")
+    else:
+        st.success(f"📊 최근 {len(items)}개의 일기를 분석합니다")
+        
+        # 날짜 선택 기능 추가
+        st.markdown("### 📅 조언 확인 날짜 선택")
+        available_dates = sorted([item['date'] for item in items], reverse=True)
+        selected_advice_date = st.selectbox(
+            "날짜를 선택하세요 (이전 조언을 다시 볼 수 있습니다)",
+            options=available_dates,
+            index=0
+        )
+        
+        # 해당 날짜의 저장된 조언 불러오기
+        saved_advice = load_expert_advice_from_sheets(selected_advice_date)
+        
+        if saved_advice:
+            st.info(f"💾 {selected_advice_date}에 저장된 조언이 {len(saved_advice)}개 있습니다")
+        
+        st.divider()
+        
+        # 전문가 목록을 탭으로 구성
+        expert_tabs = st.tabs([
+            "🧠 심리상담사",
+            "💰 재정관리사", 
+            "⚖️ 변호사",
+            "🏥 의사",
+            "✨ 피부관리사",
+            "💪 피트니스",
+            "🚀 창업투자",
+            "🎨 예술치료",
+            "🧬 임상심리",
+            "👔 조직/HR"
+        ])
+        
+        # 각 탭별 전문가 조언
+        with expert_tabs[0]:
+            st.markdown("### 🧠 심리상담사")
+            st.caption("감정 패턴과 심리 상태를 분석합니다")
+            
+            # 저장된 조언이 있으면 표시
+            if "심리상담사" in saved_advice:
+                st.success(f"📋 저장된 조언 ({saved_advice['심리상담사']['created_at'][:10]})")
+                st.markdown(saved_advice["심리상담사"]["advice"])
+                st.divider()
+            
+            if st.button("💬 심리상담사 조언 받기", key="btn_심리상담사", use_container_width=True):
+                # 이미지 생성
+                if len(items) >= 2:
+                    with st.spinner("📊 감정 흐름 그래프 생성 중..."):
+                        emotion_flow = create_emotion_flow_chart(items)
+                        st.image(emotion_flow, caption="감정 흐름 분석", use_container_width=True)
+                    
+                    with st.spinner("🕸️ 감정 연관망 생성 중..."):
+                        emotion_network = create_emotion_network(items)
+                        st.image(emotion_network, caption="감정 연관망", use_container_width=True)
+                
+                result = get_expert_advice("심리상담사", data)
+                if result["has_content"]:
+                    st.success("**심리상담사의 조언:**")
+                    st.markdown(result["advice"])
+                    # Google Sheets에 저장
+                    save_expert_advice_to_sheets(selected_advice_date, "심리상담사", 
+                                                result["advice"], result["has_content"])
+                    st.success("💾 조언이 저장되었습니다")
+                else:
+                    st.info(result["advice"])
+        
+        with expert_tabs[1]:
+            st.markdown("### 💰 재정관리사")
+            st.caption("소비 패턴과 재정 상태를 분석합니다")
+            
+            if "재정관리사" in saved_advice:
+                st.success(f"📋 저장된 조언 ({saved_advice['재정관리사']['created_at'][:10]})")
+                st.markdown(saved_advice["재정관리사"]["advice"])
+                st.divider()
+            
+            if st.button("💬 재정관리사 조언 받기", key="btn_재정관리사", use_container_width=True):
+                result = get_expert_advice("재정관리사", data)
+                if result["has_content"]:
+                    st.success("**재정관리사의 조언:**")
+                    st.markdown(result["advice"])
+                    save_expert_advice_to_sheets(selected_advice_date, "재정관리사",
+                                                result["advice"], result["has_content"])
+                    st.success("💾 조언이 저장되었습니다")
+                else:
+                    st.info(result["advice"])
+        
+        with expert_tabs[2]:
+            st.markdown("### ⚖️ 변호사")
+            st.caption("법적 이슈와 권리 보호를 검토합니다")
+            
+            if "변호사" in saved_advice:
+                st.success(f"📋 저장된 조언 ({saved_advice['변호사']['created_at'][:10]})")
+                st.markdown(saved_advice["변호사"]["advice"])
+                st.divider()
+            
+            if st.button("💬 변호사 조언 받기", key="btn_변호사", use_container_width=True):
+                result = get_expert_advice("변호사", data)
+                if result["has_content"]:
+                    st.success("**변호사의 조언:**")
+                    st.markdown(result["advice"])
+                    save_expert_advice_to_sheets(selected_advice_date, "변호사",
+                                                result["advice"], result["has_content"])
+                    st.success("💾 조언이 저장되었습니다")
+                else:
+                    st.info(result["advice"])
+        
+        with expert_tabs[3]:
+            st.markdown("### 🏥 의사")
+            st.caption("건강 상태와 생활습관을 점검합니다")
+            
+            if "의사" in saved_advice:
+                st.success(f"📋 저장된 조언 ({saved_advice['의사']['created_at'][:10]})")
+                st.markdown(saved_advice["의사"]["advice"])
+                st.divider()
+            
+            if st.button("💬 의사 조언 받기", key="btn_의사", use_container_width=True):
+                result = get_expert_advice("의사", data)
+                if result["has_content"]:
+                    st.success("**의사의 조언:**")
+                    st.markdown(result["advice"])
+                    save_expert_advice_to_sheets(selected_advice_date, "의사",
+                                                result["advice"], result["has_content"])
+                    st.success("💾 조언이 저장되었습니다")
+                else:
+                    st.info(result["advice"])
+        
+        with expert_tabs[4]:
+            st.markdown("### ✨ 피부관리사")
+            st.caption("피부 고민과 관리 방법을 제안합니다")
+            
+            if "피부관리사" in saved_advice:
+                st.success(f"📋 저장된 조언 ({saved_advice['피부관리사']['created_at'][:10]})")
+                st.markdown(saved_advice["피부관리사"]["advice"])
+                st.divider()
+            
+            if st.button("💬 피부관리사 조언 받기", key="btn_피부관리사", use_container_width=True):
+                result = get_expert_advice("피부관리사", data)
+                if result["has_content"]:
+                    st.success("**피부관리사의 조언:**")
+                    st.markdown(result["advice"])
+                    save_expert_advice_to_sheets(selected_advice_date, "피부관리사",
+                                                result["advice"], result["has_content"])
+                    st.success("💾 조언이 저장되었습니다")
+                else:
+                    st.info(result["advice"])
+        
+        with expert_tabs[5]:
+            st.markdown("### 💪 피트니스 트레이너")
+            st.caption("운동 습관과 체력 관리를 분석합니다")
+            
+            if "피트니스 트레이너" in saved_advice:
+                st.success(f"📋 저장된 조언 ({saved_advice['피트니스 트레이너']['created_at'][:10]})")
+                st.markdown(saved_advice["피트니스 트레이너"]["advice"])
+                st.divider()
+            
+            if st.button("💬 피트니스 트레이너 조언 받기", key="btn_피트니스", use_container_width=True):
+                result = get_expert_advice("피트니스 트레이너", data)
+                if result["has_content"]:
+                    st.success("**피트니스 트레이너의 조언:**")
+                    st.markdown(result["advice"])
+                    save_expert_advice_to_sheets(selected_advice_date, "피트니스 트레이너",
+                                                result["advice"], result["has_content"])
+                    st.success("💾 조언이 저장되었습니다")
+                else:
+                    st.info(result["advice"])
+        
+        with expert_tabs[6]:
+            st.markdown("### 🚀 창업 벤처투자자")
+            st.caption("비즈니스 기회와 커리어를 분석합니다")
+            
+            if "창업 벤처투자자" in saved_advice:
+                st.success(f"📋 저장된 조언 ({saved_advice['창업 벤처투자자']['created_at'][:10]})")
+                st.markdown(saved_advice["창업 벤처투자자"]["advice"])
+                st.divider()
+            
+            if st.button("💬 창업 벤처투자자 조언 받기", key="btn_창업", use_container_width=True):
+                # 목표 달성 플로우차트 생성
+                if len(items) >= 2:
+                    with st.spinner("📊 목표 달성 흐름 분석 중..."):
+                        goal_chart = create_goal_flowchart(items)
+                        st.image(goal_chart, caption="목표 달성 동기 변화", use_container_width=True)
+                
+                result = get_expert_advice("창업 벤처투자자", data)
+                if result["has_content"]:
+                    st.success("**창업 벤처투자자의 조언:**")
+                    st.markdown(result["advice"])
+                    save_expert_advice_to_sheets(selected_advice_date, "창업 벤처투자자",
+                                                result["advice"], result["has_content"])
+                    st.success("💾 조언이 저장되었습니다")
+                else:
+                    st.info(result["advice"])
+        
+        with expert_tabs[7]:
+            st.markdown("### 🎨 예술치료사 / 문학치료사")
+            st.caption("창의적 표현과 예술을 통한 치유를 제안합니다")
+            
+            if "예술치료사" in saved_advice:
+                st.success(f"📋 저장된 조언 ({saved_advice['예술치료사']['created_at'][:10]})")
+                st.markdown(saved_advice["예술치료사"]["advice"])
+                st.divider()
+            
+            if st.button("💬 예술치료사 조언 받기", key="btn_예술", use_container_width=True):
+                # 메타포 이미지 설명 생성
+                if len(items) >= 1:
+                    metaphor_text = create_metaphor_image_prompt(items)
+                    st.info("🎨 **당신의 감정 메타포:**")
+                    st.markdown(metaphor_text)
+                
+                result = get_expert_advice("예술치료사", data)
+                st.success("**예술치료사의 조언:**")
+                st.markdown(result["advice"])
+                save_expert_advice_to_sheets(selected_advice_date, "예술치료사",
+                                            result["advice"], True)
+                st.success("💾 조언이 저장되었습니다")
+        
+        with expert_tabs[8]:
+            with tab4:
+    st.subheader("👨‍⚕️ 전문가 조언")
+    st.caption("일기 내용을 시간순으로 분석하여 전문가 관점의 조언을 제공합니다")
+    
+    data, items = get_latest_data()
+    
+    if not items:
+        st.info("📝 일기를 작성하면 전문가 조언을 받을 수 있습니다.")
+    else:
+        st.success(f"📊 최근 {len(items)}개의 일기를 분석합니다")
+        
+        # 전문가 목록을 탭으로 구성
+        expert_tabs = st.tabs([
+            "🧠 심리상담사",
+            "💰 재정관리사", 
+            "⚖️ 변호사",
+            "🏥 의사",
+            "✨ 피부관리사",
+            "💪 피트니스",
+            "🚀 창업투자",
+            "🎨 예술치료",
+            "🧬 임상심리",
+            "👔 조직/HR"
+        ])
+        
+        # 각 탭별 전문가 조언
+        with expert_tabs[0]:
+            st.markdown("### 🧠 심리상담사")
+            st.caption("감정 패턴과 심리 상태를 분석합니다")
+            if st.button("💬 심리상담사 조언 받기", key="btn_심리상담사", use_container_width=True):
+                result = get_expert_advice("심리상담사", data)
+                if result["has_content"]:
+                    st.success("**심리상담사의 조언:**")
+                    st.markdown(result["advice"])
+                else:
+                    st.info(result["advice"])
+        
+        with expert_tabs[1]:
+            st.markdown("### 💰 재정관리사")
+            st.caption("소비 패턴과 재정 상태를 분석합니다")
+            if st.button("💬 재정관리사 조언 받기", key="btn_재정관리사", use_container_width=True):
+                result = get_expert_advice("재정관리사", data)
+                if result["has_content"]:
+                    st.success("**재정관리사의 조언:**")
+                    st.markdown(result["advice"])
+                else:
+                    st.info(result["advice"])
+        
+        with expert_tabs[2]:
+            st.markdown("### ⚖️ 변호사")
+            st.caption("법적 이슈와 권리 보호를 검토합니다")
+            if st.button("💬 변호사 조언 받기", key="btn_변호사", use_container_width=True):
+                result = get_expert_advice("변호사", data)
+                if result["has_content"]:
+                    st.success("**변호사의 조언:**")
+                    st.markdown(result["advice"])
+                else:
+                    st.info(result["advice"])
+        
+        with expert_tabs[3]:
+            st.markdown("### 🏥 의사")
+            st.caption("건강 상태와 생활습관을 점검합니다")
+            if st.button("💬 의사 조언 받기", key="btn_의사", use_container_width=True):
+                result = get_expert_advice("의사", data)
+                if result["has_content"]:
+                    st.success("**의사의 조언:**")
+                    st.markdown(result["advice"])
+                else:
+                    st.info(result["advice"])
+        
+        with expert_tabs[4]:
+            st.markdown("### ✨ 피부관리사")
+            st.caption("피부 고민과 관리 방법을 제안합니다")
+            if st.button("💬 피부관리사 조언 받기", key="btn_피부관리사", use_container_width=True):
+                result = get_expert_advice("피부관리사", data)
+                if result["has_content"]:
+                    st.success("**피부관리사의 조언:**")
+                    st.markdown(result["advice"])
+                else:
+                    st.info(result["advice"])
+        
+        with expert_tabs[5]:
+            st.markdown("### 💪 피트니스 트레이너")
+            st.caption("운동 습관과 체력 관리를 분석합니다")
+            if st.button("💬 피트니스 트레이너 조언 받기", key="btn_피트니스", use_container_width=True):
+                result = get_expert_advice("피트니스 트레이너", data)
+                if result["has_content"]:
+                    st.success("**피트니스 트레이너의 조언:**")
+                    st.markdown(result["advice"])
+                else:
+                    st.info(result["advice"])
+        
+        with expert_tabs[6]:
+            st.markdown("### 🚀 창업 벤처투자자")
+            st.caption("비즈니스 기회와 커리어를 분석합니다")
+            if st.button("💬 창업 벤처투자자 조언 받기", key="btn_창업", use_container_width=True):
+                result = get_expert_advice("창업 벤처투자자", data)
+                if result["has_content"]:
+                    st.success("**창업 벤처투자자의 조언:**")
+                    st.markdown(result["advice"])
+                else:
+                    st.info(result["advice"])
+        
+        with expert_tabs[7]:
+            st.markdown("### 🎨 예술치료사 / 문학치료사")
+            st.caption("창의적 표현과 예술을 통한 치유를 제안합니다")
+            if st.button("💬 예술치료사 조언 받기", key="btn_예술", use_container_width=True):
+                result = get_expert_advice("예술치료사", data)
+                st.success("**예술치료사의 조언:**")
+                st.markdown(result["advice"])
+        
+        with expert_tabs[8]:
+            st.markdown("### 🧬 임상심리사 / 정신건강의학과 의사")
+            st.caption("정신건강을 임상적 관점에서 평가합니다")
+            if st.button("💬 임상심리사 조언 받기", key="btn_임상", use_container_width=True):
+                result = get_expert_advice("임상심리사", data)
+                st.success("**임상심리사의 조언:**")
+                st.markdown(result["advice"])
+        
+        with expert_tabs[9]:
+            st.markdown("### 👔 조직심리 전문가 / HR 코치")
+            st.caption("직장 생활과 조직 내 관계를 분석합니다")
+            if st.button("💬 조직심리 전문가 조언 받기", key="btn_조직", use_container_width=True):
+                result = get_expert_advice("조직심리 전문가", data)
+                if result["has_content"]:
+                    st.success("**조직심리 전문가의 조언:**")
+                    st.markdown(result["advice"])
+                else:
+                    st.info(result["advice"])
+        
+        st.divider()
+        st.warning("⚠️ **주의사항**: 이 조언은 AI가 생성한 것으로 참고용입니다. 전문적인 상담이나 치료가 필요한 경우 반드시 해당 분야 전문가와 상담하세요.")
+
+st.divider()import json
 import os
 from datetime import datetime
 import streamlit as st
@@ -6,6 +364,11 @@ from dotenv import load_dotenv, find_dotenv
 import google.generativeai as genai
 import gspread
 from google.oauth2.service_account import Credentials
+import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
+import networkx as nx
+from io import BytesIO
+import base64
 
 # PWA를 위한 HTML 코드
 pwa_html = """
@@ -339,6 +702,467 @@ def generate_message(today_data, recent_data):
     
     return "오늘도 일기를 써주셔서 감사해요! 😊"
 
+# 한글 폰트 설정 (그래프용)
+def set_korean_font():
+    """한글 폰트 설정"""
+    try:
+        # 시스템에서 사용 가능한 한글 폰트 찾기
+        font_list = [f.name for f in fm.fontManager.ttflist]
+        korean_fonts = ['NanumGothic', 'Malgun Gothic', 'AppleGothic', 'DejaVu Sans']
+        
+        for font in korean_fonts:
+            if font in font_list:
+                plt.rcParams['font.family'] = font
+                break
+        else:
+            plt.rcParams['font.family'] = 'sans-serif'
+        
+        plt.rcParams['axes.unicode_minus'] = False
+    except:
+        pass
+
+def create_emotion_flow_chart(items):
+    """감정 흐름 그래프 생성 (심리상담사/임상심리사용)"""
+    set_korean_font()
+    
+    fig, ax = plt.subplots(figsize=(12, 6))
+    
+    dates = [item['date'][-5:] for item in items[-14:]]  # 최근 14개
+    joy = [item['joy'] for item in items[-14:]]
+    sadness = [item['sadness'] for item in items[-14:]]
+    anger = [item['anger'] for item in items[-14:]]
+    anxiety = [item['anxiety'] for item in items[-14:]]
+    calmness = [item['calmness'] for item in items[-14:]]
+    
+    ax.plot(dates, joy, marker='o', label='기쁨', color='#FFD700', linewidth=2)
+    ax.plot(dates, sadness, marker='o', label='슬픔', color='#4169E1', linewidth=2)
+    ax.plot(dates, anger, marker='o', label='분노', color='#DC143C', linewidth=2)
+    ax.plot(dates, anxiety, marker='o', label='불안', color='#FF8C00', linewidth=2)
+    ax.plot(dates, calmness, marker='o', label='평온', color='#32CD32', linewidth=2)
+    
+    ax.set_xlabel('날짜', fontsize=12)
+    ax.set_ylabel('감정 점수', fontsize=12)
+    ax.set_title('감정 흐름 분석 (최근 2주)', fontsize=14, fontweight='bold')
+    ax.legend(loc='best')
+    ax.grid(True, alpha=0.3)
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    
+    # 이미지를 바이트로 변환
+    buf = BytesIO()
+    plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+    buf.seek(0)
+    plt.close()
+    
+    return buf
+
+def create_emotion_network(items):
+    """감정 연관망 그래프 생성 (심리상담사/임상심리사용)"""
+    set_korean_font()
+    
+    # 최근 데이터로 감정 간 상관관계 계산
+    recent_items = items[-30:]
+    
+    emotions = {
+        '기쁨': [item['joy'] for item in recent_items],
+        '슬픔': [item['sadness'] for item in recent_items],
+        '분노': [item['anger'] for item in recent_items],
+        '불안': [item['anxiety'] for item in recent_items],
+        '평온': [item['calmness'] for item in recent_items]
+    }
+    
+    # 네트워크 그래프 생성
+    G = nx.Graph()
+    
+    emotion_names = list(emotions.keys())
+    for emotion in emotion_names:
+        G.add_node(emotion)
+    
+    # 감정 간 상관관계 (간단한 계산)
+    import numpy as np
+    for i, e1 in enumerate(emotion_names):
+        for j, e2 in enumerate(emotion_names):
+            if i < j:
+                corr = np.corrcoef(emotions[e1], emotions[e2])[0, 1]
+                if abs(corr) > 0.3:  # 상관관계가 있는 경우만 연결
+                    G.add_edge(e1, e2, weight=abs(corr))
+    
+    fig, ax = plt.subplots(figsize=(10, 8))
+    pos = nx.spring_layout(G, k=2, iterations=50)
+    
+    # 노드 그리기
+    node_colors = ['#FFD700', '#4169E1', '#DC143C', '#FF8C00', '#32CD32']
+    nx.draw_networkx_nodes(G, pos, node_color=node_colors, 
+                          node_size=3000, alpha=0.9, ax=ax)
+    
+    # 엣지 그리기
+    edges = G.edges()
+    weights = [G[u][v]['weight'] for u, v in edges]
+    nx.draw_networkx_edges(G, pos, width=[w*5 for w in weights], 
+                          alpha=0.5, ax=ax)
+    
+    # 레이블 그리기
+    nx.draw_networkx_labels(G, pos, font_size=14, 
+                           font_weight='bold', ax=ax)
+    
+    ax.set_title('감정 연관망 분석', fontsize=16, fontweight='bold', pad=20)
+    ax.axis('off')
+    plt.tight_layout()
+    
+    buf = BytesIO()
+    plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+    buf.seek(0)
+    plt.close()
+    
+    return buf
+
+def create_metaphor_image_prompt(items):
+    """예술치료사용 메타포 이미지 프롬프트 생성"""
+    recent_items = items[-7:]
+    
+    # 주요 감정과 키워드 추출
+    all_keywords = []
+    emotions_summary = {'joy': 0, 'sadness': 0, 'anger': 0, 'anxiety': 0, 'calmness': 0}
+    
+    for item in recent_items:
+        all_keywords.extend(item['keywords'])
+        for emotion in emotions_summary:
+            emotions_summary[emotion] += item[emotion]
+    
+    # 가장 많이 나타난 감정
+    dominant_emotion = max(emotions_summary, key=emotions_summary.get)
+    
+    emotion_metaphors = {
+        'joy': '밝은 햇살, 피어나는 꽃, 날아오르는 새',
+        'sadness': '비 내리는 하늘, 고요한 호수, 떨어지는 나뭇잎',
+        'anger': '타오르는 불꽃, 폭풍우, 거친 파도',
+        'anxiety': '어두운 미로, 꼬인 실타래, 흔들리는 불꽃',
+        'calmness': '잔잔한 바다, 평화로운 숲, 구름 위의 하늘'
+    }
+    
+    prompt = f"""
+당신의 최근 감정 상태를 상징하는 이미지 메타포:
+
+주요 감정: {dominant_emotion}
+상징: {emotion_metaphors[dominant_emotion]}
+
+이 이미지는 당신의 무의식에서 표현되는 감정의 상징입니다.
+{emotion_metaphors[dominant_emotion]}와 같은 이미지를 통해 
+내면의 감정을 시각화하고 이해할 수 있습니다.
+"""
+    
+    return prompt
+
+def create_goal_flowchart(items):
+    """창업투자자용 목표 달성 흐름차트"""
+    set_korean_font()
+    
+    fig, ax = plt.subplots(figsize=(12, 8))
+    
+    # 최근 아이템에서 키워드 분석
+    recent_items = items[-14:]
+    
+    dates = [item['date'][-5:] for item in recent_items]
+    scores = [item['total_score'] for item in recent_items]
+    
+    # 목표 달성도 시각화 (감정 점수를 동기/에너지 수준으로 해석)
+    ax.plot(dates, scores, marker='o', color='#1E90FF', linewidth=3, 
+            markersize=10, label='동기/에너지 수준')
+    
+    # 평균선 추가
+    avg_score = sum(scores) / len(scores)
+    ax.axhline(y=avg_score, color='r', linestyle='--', linewidth=2, 
+               alpha=0.7, label=f'평균: {avg_score:.1f}')
+    
+    # 목표선 (8점)
+    ax.axhline(y=8, color='g', linestyle='--', linewidth=2, 
+               alpha=0.5, label='목표 수준: 8.0')
+    
+    # 영역 색칠
+    ax.fill_between(range(len(dates)), scores, avg_score, 
+                    where=[s >= avg_score for s in scores],
+                    alpha=0.3, color='green', label='상승 구간')
+    ax.fill_between(range(len(dates)), scores, avg_score,
+                    where=[s < avg_score for s in scores],
+                    alpha=0.3, color='red', label='하락 구간')
+    
+    ax.set_xlabel('날짜', fontsize=12)
+    ax.set_ylabel('동기/에너지 수준', fontsize=12)
+    ax.set_title('목표 달성 동기 변화 분석', fontsize=14, fontweight='bold')
+    ax.legend(loc='best')
+    ax.grid(True, alpha=0.3)
+    ax.set_ylim([0, 10])
+    plt.xticks(range(len(dates)), dates, rotation=45)
+    plt.tight_layout()
+    
+    buf = BytesIO()
+    plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+    buf.seek(0)
+    plt.close()
+    
+    return buf
+
+def save_expert_advice_to_sheets(date_str, expert_type, advice, has_content):
+    """전문가 조언을 Google Sheets에 저장"""
+    try:
+        # 기존 조언 확인
+        all_values = expert_worksheet.get_all_values()
+        row_index = None
+        
+        for idx, row in enumerate(all_values[1:], start=2):
+            if len(row) >= 2 and row[0] == date_str and row[1] == expert_type:
+                row_index = idx
+                break
+        
+        row_data = [
+            str(date_str),
+            str(expert_type),
+            str(advice),
+            str(has_content),
+            datetime.now().isoformat()
+        ]
+        
+        if row_index:
+            expert_worksheet.update(f'A{row_index}:E{row_index}', [row_data])
+        else:
+            expert_worksheet.append_row(row_data)
+        
+        return True
+    except Exception as e:
+        st.error(f"조언 저장 오류: {e}")
+        return False
+
+def load_expert_advice_from_sheets(date_str):
+    """특정 날짜의 전문가 조언 불러오기"""
+    try:
+        records = expert_worksheet.get_all_records()
+        advice_data = {}
+        
+        for record in records:
+            if record.get('date') == date_str:
+                expert_type = record.get('expert_type', '')
+                advice_data[expert_type] = {
+                    'advice': record.get('advice', ''),
+                    'has_content': record.get('has_content', 'False') == 'True',
+                    'created_at': record.get('created_at', '')
+                }
+        
+        return advice_data
+    except Exception as e:
+        st.error(f"조언 로드 오류: {e}")
+        return {}
+
+def get_expert_advice(expert_type, diary_data):
+    """전문가 조언 생성"""
+    
+    # 일기 데이터를 시간순으로 정렬
+    sorted_diaries = sorted(diary_data.values(), key=lambda x: x['date'])
+    
+    # 최근 30개 일기만 분석 (너무 많으면 토큰 제한)
+    recent_diaries = sorted_diaries[-30:]
+    
+    # 일기 요약 생성
+    diary_summary = []
+    for diary in recent_diaries:
+        summary = f"날짜: {diary['date']}, 내용: {diary['content'][:100]}..., 감정점수: {diary['total_score']}"
+        diary_summary.append(summary)
+    
+    diary_text = "\n".join(diary_summary)
+    
+    # 전문가별 프롬프트
+    expert_prompts = {
+        "심리상담사": f"""
+당신은 경험 많은 심리상담사입니다.
+다음은 사용자의 최근 일기 내용입니다 (시간순):
+
+{diary_text}
+
+위 일기들을 분석하여:
+1. 감정 패턴과 심리 상태 분석
+2. 반복되는 스트레스 요인 파악
+3. 심리적 건강을 위한 구체적 조언
+4. 필요시 전문가 상담 권유
+
+조언할 내용이 있으면 따뜻하고 공감적인 톤으로 작성하세요.
+조언할 특별한 내용이 없다면 "현재 심리적으로 안정적인 상태로 보입니다."라고 답변하세요.
+
+JSON 형식으로 답변: {{"advice": "조언 내용", "has_content": true/false}}
+""",
+        "재정관리사": f"""
+당신은 전문 재정관리사입니다.
+다음은 사용자의 최근 일기 내용입니다 (시간순):
+
+{diary_text}
+
+위 일기들에서 금전, 소비, 지출, 저축, 투자 등 재정 관련 내용을 찾아 분석하여:
+1. 소비 패턴 분석
+2. 재정 스트레스 요인 파악
+3. 재정 건강을 위한 구체적 조언
+4. 저축이나 지출 개선 방안
+
+재정 관련 내용이 있으면 전문적이고 실용적인 조언을 제공하세요.
+재정 관련 내용이 없거나 미미하다면 "일기에서 재정 관련 내용을 찾을 수 없습니다."라고 답변하세요.
+
+JSON 형식으로 답변: {{"advice": "조언 내용", "has_content": true/false}}
+""",
+        "변호사": f"""
+당신은 경험 많은 변호사입니다.
+다음은 사용자의 최근 일기 내용입니다 (시간순):
+
+{diary_text}
+
+위 일기들에서 법적 문제, 계약, 분쟁, 권리 침해 등 법률 관련 내용을 찾아 분석하여:
+1. 잠재적 법적 이슈 파악
+2. 권리 보호 방안
+3. 법적 주의사항
+4. 필요시 전문 법률 상담 권유
+
+법적 문제가 있으면 신중하고 전문적인 조언을 제공하세요.
+법적 문제가 없다면 "일기에서 법적 조언이 필요한 내용을 찾을 수 없습니다."라고 답변하세요.
+
+JSON 형식으로 답변: {{"advice": "조언 내용", "has_content": true/false}}
+""",
+        "의사": f"""
+당신은 경험 많은 종합병원 의사입니다.
+다음은 사용자의 최근 일기 내용입니다 (시간순):
+
+{diary_text}
+
+위 일기들에서 건강, 질병, 증상, 통증, 수면 등 의학 관련 내용을 찾아 분석하여:
+1. 건강 상태 패턴 분석
+2. 주의해야 할 증상
+3. 생활습관 개선 조언
+4. 필요시 병원 진료 권유
+
+건강 관련 내용이 있으면 의학적으로 신중한 조언을 제공하세요.
+건강 문제가 없다면 "일기에서 특별한 건강 문제를 찾을 수 없습니다. 건강한 상태를 유지하세요."라고 답변하세요.
+
+JSON 형식으로 답변: {{"advice": "조언 내용", "has_content": true/false}}
+""",
+        "피부관리사": f"""
+당신은 전문 피부관리사입니다.
+다음은 사용자의 최근 일기 내용입니다 (시간순):
+
+{diary_text}
+
+위 일기들에서 피부, 외모, 미용, 화장품, 피부 트러블 등 관련 내용을 찾아 분석하여:
+1. 피부 고민 파악
+2. 생활습관과 피부 상태 연관성 분석
+3. 피부 관리 조언
+4. 제품 사용이나 관리 팁
+
+피부 관련 내용이 있으면 전문적이고 실용적인 조언을 제공하세요.
+피부 관련 내용이 없다면 "일기에서 피부 관련 고민을 찾을 수 없습니다."라고 답변하세요.
+
+JSON 형식으로 답변: {{"advice": "조언 내용", "has_content": true/false}}
+""",
+        "피트니스 트레이너": f"""
+당신은 경험 많은 피트니스 퍼스널 트레이너입니다.
+다음은 사용자의 최근 일기 내용입니다 (시간순):
+
+{diary_text}
+
+위 일기들에서 운동, 다이어트, 체력, 신체활동 등 관련 내용을 찾아 분석하여:
+1. 운동 습관 분석
+2. 체력 및 건강 상태 파악
+3. 운동 루틴 제안
+4. 동기부여 메시지
+
+운동 관련 내용이 있으면 실천 가능한 조언을 제공하세요.
+운동 관련 내용이 없다면 "일기에서 운동 관련 내용을 찾을 수 없습니다. 규칙적인 운동을 시작해보세요!"라고 답변하세요.
+
+JSON 형식으로 답변: {{"advice": "조언 내용", "has_content": true/false}}
+""",
+        "창업 벤처투자자": f"""
+당신은 성공한 창업가이자 벤처투자자입니다.
+다음은 사용자의 최근 일기 내용입니다 (시간순):
+
+{diary_text}
+
+위 일기들에서 사업, 창업, 아이디어, 커리어, 직장, 프로젝트 등 관련 내용을 찾아 분석하여:
+1. 비즈니스 기회 포착
+2. 창업 아이디어 검증
+3. 커리어 개발 조언
+4. 실행 가능한 다음 단계 제안
+
+창업이나 비즈니스 관련 내용이 있으면 실용적이고 구체적인 조언을 제공하세요.
+관련 내용이 없다면 "일기에서 창업이나 비즈니스 관련 내용을 찾을 수 없습니다."라고 답변하세요.
+
+JSON 형식으로 답변: {{"advice": "조언 내용", "has_content": true/false}}
+""",
+        "예술치료사": f"""
+당신은 경험 많은 예술치료사이자 문학치료사입니다.
+다음은 사용자의 최근 일기 내용입니다 (시간순):
+
+{diary_text}
+
+위 일기들을 창의적이고 예술적 관점에서 분석하여:
+1. 글쓰기를 통한 감정 표현 패턴 분석
+2. 은유와 상징 해석
+3. 창의적 표현 활동 제안 (그림, 음악, 글쓰기 등)
+4. 예술을 통한 치유 방법 제시
+
+예술적 표현이나 창의적 활동 관련 내용이 있으면 감성적이고 창의적인 조언을 제공하세요.
+관련 내용이 없어도 "일기를 통해 자신을 표현하는 것 자체가 훌륭한 예술 활동입니다."라는 긍정적 메시지를 포함하세요.
+
+JSON 형식으로 답변: {{"advice": "조언 내용", "has_content": true}}
+""",
+        "임상심리사": f"""
+당신은 임상심리사이자 정신건강의학과 전문의입니다.
+다음은 사용자의 최근 일기 내용입니다 (시간순):
+
+{diary_text}
+
+위 일기들을 임상적 관점에서 분석하여:
+1. 정신건강 상태 평가 (우울, 불안, 스트레스 수준)
+2. 병리적 징후 여부 확인
+3. 인지 패턴과 사고 왜곡 파악
+4. 전문적 치료나 약물 치료 필요성 판단
+5. 자가 관리 방법과 대처 기술 제안
+
+심각한 정신건강 문제가 의심되면 반드시 전문의 상담을 권유하세요.
+정상 범위라면 "현재 정신건강은 양호한 상태입니다."라고 답변하되, 예방적 관리 방법도 제시하세요.
+
+JSON 형식으로 답변: {{"advice": "조언 내용", "has_content": true}}
+""",
+        "조직심리 전문가": f"""
+당신은 조직심리 전문가이자 HR 코치입니다.
+다음은 사용자의 최근 일기 내용입니다 (시간순):
+
+{diary_text}
+
+위 일기들에서 직장, 조직, 팀워크, 리더십, 대인관계, 업무 스트레스 등 관련 내용을 찾아 분석하여:
+1. 조직 내 관계 패턴 분석
+2. 업무 스트레스 요인 파악
+3. 리더십 및 커뮤니케이션 개선 방안
+4. 워크라이프 밸런스 조언
+5. 경력 개발 및 성장 전략
+
+직장 관련 내용이 있으면 조직심리학 관점에서 구체적인 조언을 제공하세요.
+직장 관련 내용이 없다면 "일기에서 조직이나 직장 관련 내용을 찾을 수 없습니다."라고 답변하세요.
+
+JSON 형식으로 답변: {{"advice": "조언 내용", "has_content": true/false}}
+"""
+    }
+    
+    prompt = expert_prompts.get(expert_type, "")
+    
+    try:
+        with st.spinner(f'🤖 {expert_type} 분석 중...'):
+            response_text = gemini_chat(prompt)
+            if response_text:
+                # JSON 추출
+                start = response_text.find('{')
+                end = response_text.rfind('}') + 1
+                if start >= 0 and end > start:
+                    json_text = response_text[start:end]
+                    result = json.loads(json_text)
+                    return result
+    except Exception as e:
+        st.error(f"분석 오류: {e}")
+    
+    return {"advice": "조언을 생성할 수 없습니다.", "has_content": False}
+
 def calc_total_score(item):
     score = (2 * item["joy"] + 1.5 * item["calmness"] - 
              2 * item["sadness"] - 1.5 * item["anxiety"] - 1.5 * item["anger"] + 50)
@@ -348,7 +1172,7 @@ def calc_total_score(item):
 st.title("📱 감정 일기")
 st.caption("AI가 분석하는 나만의 감정 기록 ☁️")
 
-tab1, tab2, tab3 = st.tabs(["✍️ 쓰기", "📊 통계", "📈 그래프"])
+tab1, tab2, tab3, tab4 = st.tabs(["✍️ 쓰기", "📊 통계", "📈 그래프", "👨‍⚕️ 전문가 조언"])
 
 with tab1:
     st.subheader("오늘의 마음")
@@ -529,60 +1353,47 @@ with tab3:
         st.area_chart(emotions, x="날짜", 
                      y=["😄기쁨", "😌평온", "😰불안", "😢슬픔", "😡분노"], height=300)
 
+with tab4:
+    st.subheader("👨‍⚕️ 전문가 조언")
+    st.caption("일기 내용을 분석하여 전문가 관점의 조언을 제공합니다")
+    
+    data, items = get_latest_data()
+    
+    if not items:
+        st.info("📝 일기를 작성하면 전문가 조언을 받을 수 있습니다.")
+    else:
+        st.success(f"📊 {len(items)}개의 일기를 분석합니다")
+        
+        # 전문가 목록
+        experts = {
+            "🧠 심리상담사": "심리상담사",
+            "💰 재정관리사": "재정관리사",
+            "⚖️ 변호사": "변호사",
+            "🏥 의사": "의사",
+            "✨ 피부관리사": "피부관리사",
+            "💪 피트니스 트레이너": "피트니스 트레이너",
+            "🚀 창업 벤처투자자": "창업 벤처투자자"
+        }
+        
+        st.write("### 📋 전문가 선택")
+        st.write("분석받고 싶은 전문가를 선택하세요:")
+        
+        # 전문가별 조언 표시
+        for display_name, expert_type in experts.items():
+            with st.expander(f"{display_name}", expanded=False):
+                if st.button(f"💬 {expert_type} 조언 받기", key=f"btn_{expert_type}"):
+                    result = get_expert_advice(expert_type, data)
+                    
+                    if result["has_content"]:
+                        st.success(f"**{expert_type}의 조언:**")
+                        st.markdown(result["advice"])
+                    else:
+                        st.info(result["advice"])
+        
+        st.divider()
+        st.warning("⚠️ **주의사항**: 이 조언은 AI가 생성한 것으로 참고용입니다. 전문적인 상담이나 치료가 필요한 경우 반드시 해당 분야 전문가와 상담하세요.")
+
 st.divider()
 st.markdown("### 💝 매일 감정을 기록하며 마음을 돌보세요!")
 st.caption("🤖 AI가 감정을 분석하고 ☁️ 클라우드에 안전하게 보관합니다")
-
-# 🧠 전문가 조언 탭 추가
-tab1, tab2, tab3, tab4 = st.tabs(["✍️ 쓰기", "📊 통계", "📈 그래프", "🧠 전문가 조언"])
-
-# 전문가 조언 탭
-with tab4:
-    st.subheader("🧠 전문가 조언")
-    st.caption("Gemini가 전체 일기 데이터를 분석하여 전문가 시각에서 조언을 제공합니다.")
-
-    # 전체 데이터 불러오기
-    data = load_data_from_sheets()
-    if not data:
-        st.warning("⚠️ 저장된 일기 데이터가 없습니다. 먼저 일기를 작성해주세요.")
-        st.stop()
-
-    # 시간순 정렬
-    sorted_items = sorted(data.values(), key=lambda x: x["date"])
-    diary_texts = "\n\n".join([f"[{item['date']}] {item['content']}" for item in sorted_items])
-
-    experts = {
-        "심리상담사": "정서적 안정, 불안, 우울, 감정 조절에 대한 심리상담적 조언을 해줘.",
-        "재정관리사": "소비습관, 재무스트레스, 돈 관련 감정이나 계획에 대한 조언을 해줘.",
-        "변호사": "법적 문제, 갈등, 권리 보호와 관련된 부분이 있는지 판단하고 조언을 해줘.",
-        "의사": "건강, 수면, 식습관, 스트레스와 관련된 의학적 조언을 해줘.",
-        "피부관리사": "피부, 외모, 스트레스성 피부 문제와 관련된 조언이 있으면 알려줘.",
-        "피트니스 트레이너": "운동, 체력, 에너지 수준, 생활습관과 관련된 피트니스 조언을 해줘.",
-        "창업 벤처투자자": "일기 내용 중 도전정신, 창의적 아이디어, 사업 관련 고민이 있다면 조언을 해줘."
-    }
-
-    # 분석 실행 버튼
-    if st.button("🔍 전문가 조언 분석 시작", type="primary", use_container_width=True):
-        with st.spinner("Gemini가 전문가별 분석을 진행 중입니다..."):
-            for expert, instruction in experts.items():
-                prompt = f"""
-                너는 {expert}야. 아래는 한 개인이 기록한 일기 전체 내용이야.
-                시간순으로 정리된 감정과 사건을 읽고, 네 전문가 시각으로 의미 있는 조언을 해줘.
-                내용 중 {instruction}
-                일기 내용:
-                ---
-                {diary_texts}
-                ---
-                결과는 짧고 실질적인 조언 위주로.
-                """
-
-                response = gemini_chat(prompt)
-                st.divider()
-                st.markdown(f"### 💬 {expert}의 조언")
-
-                if response and len(response.strip()) > 10:
-                    st.write(response.strip())
-                else:
-                    st.info("🫧 현재 일기 내용에는 특별히 조언할 부분이 없습니다.")
-
 
