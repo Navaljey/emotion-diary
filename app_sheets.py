@@ -1,21 +1,25 @@
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 import streamlit as st
 from dotenv import load_dotenv, find_dotenv
 import google.generativeai as genai
 import gspread
 from google.oauth2.service_account import Credentials
 import matplotlib.pyplot as plt
-import matplotlib.font_manager as fm
+import matplotlib
 import networkx as nx
 from io import BytesIO
-import re
+import numpy as np
 
-# PWA를 위한 HTML 코드
+# 한글 폰트 설정 (matplotlib 백엔드 설정)
+matplotlib.use('Agg')
+plt.rcParams['font.family'] = 'DejaVu Sans'
+plt.rcParams['axes.unicode_minus'] = False
+
+# PWA HTML
 pwa_html = """
 <link rel="manifest" href="data:application/json;charset=utf-8,%7B%22name%22%3A%22%EA%B0%90%EC%A0%95%20%EC%9D%BC%EA%B8%B0%22%2C%22short_name%22%3A%22%EA%B0%90%EC%A0%95%EC%9D%BC%EA%B8%B0%22%2C%22description%22%3A%22AI%EA%B0%80%20%EB%B6%84%EC%84%9D%ED%95%98%EB%8A%94%20%EA%B0%90%EC%A0%95%20%EC%9D%BC%EA%B8%B0%20%EC%95%B1%22%2C%22start_url%22%3A%22%2F%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%23ffffff%22%2C%22theme_color%22%3A%22%23ff6b6b%22%2C%22icons%22%3A%5B%7B%22src%22%3A%22data%3Aimage%2Fsvg%2Bxml%3Bcharset%3Dutf-8%2C%253Csvg%2520xmlns%253D%2522http%253A%252F%252Fwww.w3.org%252F2000%252Fsvg%2522%2520viewBox%253D%25220%25200%2520100%2520100%2522%253E%253Ctext%2520y%253D%2522.9em%2522%2520font-size%253D%252290%2522%253E%25E2%259C%258D%25EF%25B8%258F%253C%252Ftext%253E%253C%252Fsvg%253E%22%2C%22sizes%22%3A%22192x192%22%2C%22type%22%3A%22image%2Fsvg%2Bxml%22%7D%5D%7D">
-
 <style>
 @media only screen and (max-width: 768px) {
     .stApp > header { background-color: transparent; }
@@ -26,14 +30,8 @@ pwa_html = """
         padding-right: 1rem;
     }
     .stTabs [data-baseweb="tab-list"] { gap: 0.5rem; }
-    .stTabs [data-baseweb="tab"] {
-        height: 3rem;
-        padding: 0.5rem 1rem;
-    }
-    .stButton > button {
-        height: 3rem;
-        font-size: 1.1rem;
-    }
+    .stTabs [data-baseweb="tab"] { height: 3rem; padding: 0.5rem 1rem; }
+    .stButton > button { height: 3rem; font-size: 1.1rem; }
     [data-testid="metric-container"] {
         background-color: #f0f2f6;
         border: 1px solid #e1e5eb;
@@ -76,18 +74,16 @@ if GEMINI_API_KEY:
                 available_models.append(m.name)
                 st.sidebar.success(f"✅ {m.name}")
         
-        if not available_models:
-            st.sidebar.warning("⚠️ 사용 가능한 모델이 없습니다")
+        if available_models:
+            model_name = available_models[0].replace('models/', '')
+            st.sidebar.info(f"📌 사용 중: {model_name}")
+            model = genai.GenerativeModel(model_name)
+        else:
+            st.error("❌ 사용 가능한 Gemini 모델이 없습니다.")
+            st.stop()
     except Exception as e:
-        st.sidebar.error(f"❌ 모델 목록 조회 오류: {e}")
-    
-    if available_models:
-        model_name = available_models[0].replace('models/', '')
-        st.sidebar.info(f"📌 사용 중인 모델: {model_name}")
-        model = genai.GenerativeModel(model_name)
-    else:
-        st.error("❌ 사용 가능한 Gemini 모델이 없습니다. API 키를 확인해주세요.")
-        st.stop()
+        st.sidebar.error(f"모델 확인 오류: {e}")
+        model = genai.GenerativeModel('gemini-pro')
 else:
     st.error("🔑 GEMINI_API_KEY가 설정되지 않았습니다.")
     st.stop()
@@ -95,53 +91,49 @@ else:
 # Google Sheets 연결
 @st.cache_resource
 def init_google_sheets():
-    """Google Sheets 연결 초기화"""
     try:
         scopes = [
             'https://www.googleapis.com/auth/spreadsheets',
             'https://www.googleapis.com/auth/drive'
         ]
+        
         credentials_dict = dict(st.secrets["gcp_service_account"])
         credentials = Credentials.from_service_account_info(credentials_dict, scopes=scopes)
         client = gspread.authorize(credentials)
+        
         SPREADSHEET_ID = st.secrets["SPREADSHEET_ID"]
         spreadsheet = client.open_by_key(SPREADSHEET_ID)
-
-        # diary_data 워크시트
+        
         try:
-            diary_worksheet = spreadsheet.worksheet("diary_data")
+            diary_ws = spreadsheet.worksheet("diary_data")
         except:
-            diary_worksheet = spreadsheet.add_worksheet(title="diary_data", rows=1000, cols=20)
-            diary_worksheet.update('A1:K1', [[
-                'date', 'content', 'keywords', 'total_score',
-                'joy', 'sadness', 'anger', 'anxiety', 'calmness',
+            diary_ws = spreadsheet.add_worksheet(title="diary_data", rows=1000, cols=20)
+            diary_ws.update('A1:K1', [[
+                'date', 'content', 'keywords', 'total_score', 
+                'joy', 'sadness', 'anger', 'anxiety', 'calmness', 
                 'message', 'created_at'
             ]])
-
-        # expert_advice 워크시트
+        
         try:
-            expert_worksheet = spreadsheet.worksheet("expert_advice")
+            expert_ws = spreadsheet.worksheet("expert_advice")
         except:
-            expert_worksheet = spreadsheet.add_worksheet(title="expert_advice", rows=1000, cols=10)
-            expert_worksheet.update('A1:E1', [[
-                'date', 'expert_type', 'advice', 'has_content', 'created_at'
-            ]])
-
-        return diary_worksheet, expert_worksheet
+            expert_ws = spreadsheet.add_worksheet(title="expert_advice", rows=1000, cols=20)
+            expert_ws.update('A1:E1', [['date', 'expert_type', 'advice', 'has_content', 'created_at']])
+        
+        try:
+            reminder_ws = spreadsheet.worksheet("reminders")
+        except:
+            reminder_ws = spreadsheet.add_worksheet(title="reminders", rows=1000, cols=20)
+            reminder_ws.update('A1:D1', [['date', 'reminder_type', 'message', 'is_read']])
+        
+        return diary_ws, expert_ws, reminder_ws
     except Exception as e:
         st.error(f"❌ Google Sheets 연결 실패: {e}")
-        st.info("""
-        **설정을 확인해주세요:**
-        1. Streamlit Secrets에 gcp_service_account 정보가 있나요?
-        2. SPREADSHEET_ID가 올바른가요?
-        3. Google Sheets를 서비스 계정과 공유했나요?
-        """)
         st.stop()
 
-diary_worksheet, expert_worksheet = init_google_sheets()
+diary_worksheet, expert_worksheet, reminder_worksheet = init_google_sheets()
 
 def load_data_from_sheets():
-    """Google Sheets에서 데이터 로드"""
     try:
         st.sidebar.info("🔄 데이터 로딩 중...")
         records = diary_worksheet.get_all_records()
@@ -174,15 +166,11 @@ def load_data_from_sheets():
         return data
     except Exception as e:
         st.sidebar.error(f"로드 오류: {e}")
-        import traceback
-        st.sidebar.error(traceback.format_exc())
         return {}
 
 def save_data_to_sheets(date_str, item_data):
-    """Google Sheets에 데이터 저장"""
     try:
         st.info(f"🔄 저장 시도: {date_str}")
-        
         all_values = diary_worksheet.get_all_values()
         st.info(f"📊 현재 시트 행 수: {len(all_values)}")
         
@@ -195,15 +183,10 @@ def save_data_to_sheets(date_str, item_data):
         
         keywords_str = json.dumps(item_data['keywords'], ensure_ascii=False)
         row_data = [
-            str(date_str), 
-            str(item_data['content']), 
-            str(keywords_str), 
+            str(date_str), str(item_data['content']), str(keywords_str), 
             float(item_data['total_score']),
-            int(item_data['joy']), 
-            int(item_data['sadness']), 
-            int(item_data['anger']),
-            int(item_data['anxiety']), 
-            int(item_data['calmness']), 
+            int(item_data['joy']), int(item_data['sadness']), int(item_data['anger']),
+            int(item_data['anxiety']), int(item_data['calmness']), 
             str(item_data['message']),
             datetime.now().isoformat()
         ]
@@ -226,11 +209,10 @@ def save_data_to_sheets(date_str, item_data):
     except Exception as e:
         st.error(f"❌ 저장 오류: {e}")
         import traceback
-        st.error(f"상세 오류:\n```\n{traceback.format_exc()}\n```")
+        st.error(f"상세:\n```\n{traceback.format_exc()}\n```")
         return False
 
 def delete_data_from_sheets(date_str):
-    """Google Sheets에서 데이터 삭제"""
     try:
         all_values = diary_worksheet.get_all_values()
         for idx, row in enumerate(all_values[1:], start=2):
@@ -247,6 +229,254 @@ def get_latest_data():
     items = sorted(data.values(), key=lambda x: x["date"])[-30:]
     return data, items
 
+def save_expert_advice_to_sheets(date_str, expert_type, advice, has_content):
+    try:
+        all_values = expert_worksheet.get_all_values()
+        row_index = None
+        
+        for idx, row in enumerate(all_values[1:], start=2):
+            if len(row) >= 2 and row[0] == date_str and row[1] == expert_type:
+                row_index = idx
+                break
+        
+        row_data = [str(date_str), str(expert_type), str(advice), str(has_content), datetime.now().isoformat()]
+        
+        if row_index:
+            expert_worksheet.update(f'A{row_index}:E{row_index}', [row_data])
+        else:
+            expert_worksheet.append_row(row_data)
+        
+        return True
+    except Exception as e:
+        st.error(f"조언 저장 오류: {e}")
+        return False
+
+def load_expert_advice_from_sheets(date_str):
+    try:
+        records = expert_worksheet.get_all_records()
+        advice_data = {}
+        
+        for record in records:
+            if record.get('date') == date_str:
+                expert_type = record.get('expert_type', '')
+                advice_data[expert_type] = {
+                    'advice': record.get('advice', ''),
+                    'has_content': record.get('has_content', 'False') == 'True',
+                    'created_at': record.get('created_at', '')
+                }
+        
+        return advice_data
+    except Exception as e:
+        return {}
+
+def save_reminder(reminder_type, message):
+    try:
+        today = datetime.now().strftime("%Y-%m-%d")
+        row_data = [today, reminder_type, message, 'False']
+        reminder_worksheet.append_row(row_data)
+        return True
+    except:
+        return False
+
+def load_unread_reminders():
+    try:
+        records = reminder_worksheet.get_all_records()
+        unread = []
+        for record in records:
+            if record.get('is_read') == 'False' or record.get('is_read') == False:
+                unread.append(record)
+        return unread
+    except:
+        return []
+
+def mark_reminder_as_read(date, reminder_type):
+    try:
+        all_values = reminder_worksheet.get_all_values()
+        for idx, row in enumerate(all_values[1:], start=2):
+            if row[0] == date and row[1] == reminder_type:
+                reminder_worksheet.update(f'D{idx}', [['True']])
+                break
+        return True
+    except:
+        return False
+
+def check_and_create_reminders(items):
+    if not items:
+        return
+    
+    today = datetime.now().date()
+    
+    # 마지막 일기 날짜 확인
+    last_diary_date = datetime.strptime(items[-1]['date'], '%Y-%m-%d').date()
+    days_since_last = (today - last_diary_date).days
+    
+    # 3일 이상 일기를 안 썼으면 알림
+    if days_since_last >= 3:
+        message = f"💭 마지막 일기를 쓴 지 {days_since_last}일이 지났습니다. 오늘의 감정을 기록해보세요!"
+        save_reminder("일기_작성_독려", message)
+    
+    # 주간 분석 알림 (매주 일요일)
+    if today.weekday() == 6:  # 일요일
+        message = "📊 이번 주 감정을 돌아볼 시간입니다. 전문가 조언을 받아보세요!"
+        save_reminder("주간_분석", message)
+
+def create_emotion_flow_chart(items):
+    try:
+        fig, ax = plt.subplots(figsize=(12, 6))
+        
+        recent_items = items[-14:] if len(items) >= 14 else items
+        dates = [item['date'][-5:] for item in recent_items]
+        joy = [item['joy'] for item in recent_items]
+        sadness = [item['sadness'] for item in recent_items]
+        anger = [item['anger'] for item in recent_items]
+        anxiety = [item['anxiety'] for item in recent_items]
+        calmness = [item['calmness'] for item in recent_items]
+        
+        ax.plot(dates, joy, marker='o', label='Joy', color='#FFD700', linewidth=2)
+        ax.plot(dates, sadness, marker='o', label='Sadness', color='#4169E1', linewidth=2)
+        ax.plot(dates, anger, marker='o', label='Anger', color='#DC143C', linewidth=2)
+        ax.plot(dates, anxiety, marker='o', label='Anxiety', color='#FF8C00', linewidth=2)
+        ax.plot(dates, calmness, marker='o', label='Calm', color='#32CD32', linewidth=2)
+        
+        ax.set_xlabel('Date', fontsize=12)
+        ax.set_ylabel('Emotion Score', fontsize=12)
+        ax.set_title('Emotion Flow Analysis (Recent 2 Weeks)', fontsize=14, fontweight='bold')
+        ax.legend(loc='best')
+        ax.grid(True, alpha=0.3)
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        
+        buf = BytesIO()
+        plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+        buf.seek(0)
+        plt.close()
+        
+        return buf
+    except Exception as e:
+        st.error(f"그래프 생성 오류: {e}")
+        return None
+
+def create_emotion_network(items):
+    try:
+        fig, ax = plt.subplots(figsize=(10, 8))
+        
+        recent_items = items[-30:] if len(items) >= 30 else items
+        
+        emotions = {
+            'Joy': [item['joy'] for item in recent_items],
+            'Sadness': [item['sadness'] for item in recent_items],
+            'Anger': [item['anger'] for item in recent_items],
+            'Anxiety': [item['anxiety'] for item in recent_items],
+            'Calm': [item['calmness'] for item in recent_items]
+        }
+        
+        G = nx.Graph()
+        emotion_names = list(emotions.keys())
+        for emotion in emotion_names:
+            G.add_node(emotion)
+        
+        for i, e1 in enumerate(emotion_names):
+            for j, e2 in enumerate(emotion_names):
+                if i < j:
+                    corr = np.corrcoef(emotions[e1], emotions[e2])[0, 1]
+                    if abs(corr) > 0.3:
+                        G.add_edge(e1, e2, weight=abs(corr))
+        
+        pos = nx.spring_layout(G, k=2, iterations=50)
+        node_colors = ['#FFD700', '#4169E1', '#DC143C', '#FF8C00', '#32CD32']
+        nx.draw_networkx_nodes(G, pos, node_color=node_colors, node_size=3000, alpha=0.9, ax=ax)
+        
+        edges = G.edges()
+        weights = [G[u][v]['weight'] for u, v in edges]
+        nx.draw_networkx_edges(G, pos, width=[w*5 for w in weights], alpha=0.5, ax=ax)
+        nx.draw_networkx_labels(G, pos, font_size=14, font_weight='bold', ax=ax)
+        
+        ax.set_title('Emotion Correlation Network', fontsize=16, fontweight='bold', pad=20)
+        ax.axis('off')
+        plt.tight_layout()
+        
+        buf = BytesIO()
+        plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+        buf.seek(0)
+        plt.close()
+        
+        return buf
+    except Exception as e:
+        st.error(f"네트워크 그래프 오류: {e}")
+        return None
+
+def create_goal_flowchart(items):
+    try:
+        fig, ax = plt.subplots(figsize=(12, 8))
+        
+        recent_items = items[-14:] if len(items) >= 14 else items
+        dates = [item['date'][-5:] for item in recent_items]
+        scores = [item['total_score'] for item in recent_items]
+        
+        ax.plot(dates, scores, marker='o', color='#1E90FF', linewidth=3, 
+                markersize=10, label='Motivation/Energy Level')
+        
+        avg_score = sum(scores) / len(scores)
+        ax.axhline(y=avg_score, color='r', linestyle='--', linewidth=2, 
+                   alpha=0.7, label=f'Average: {avg_score:.1f}')
+        ax.axhline(y=8, color='g', linestyle='--', linewidth=2, 
+                   alpha=0.5, label='Target: 8.0')
+        
+        ax.fill_between(range(len(dates)), scores, avg_score, 
+                        where=[s >= avg_score for s in scores],
+                        alpha=0.3, color='green', label='Rising')
+        ax.fill_between(range(len(dates)), scores, avg_score,
+                        where=[s < avg_score for s in scores],
+                        alpha=0.3, color='red', label='Falling')
+        
+        ax.set_xlabel('Date', fontsize=12)
+        ax.set_ylabel('Motivation Level', fontsize=12)
+        ax.set_title('Goal Achievement Motivation Analysis', fontsize=14, fontweight='bold')
+        ax.legend(loc='best')
+        ax.grid(True, alpha=0.3)
+        ax.set_ylim([0, 10])
+        plt.xticks(range(len(dates)), dates, rotation=45)
+        plt.tight_layout()
+        
+        buf = BytesIO()
+        plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+        buf.seek(0)
+        plt.close()
+        
+        return buf
+    except Exception as e:
+        st.error(f"플로우차트 오류: {e}")
+        return None
+
+def create_metaphor_prompt(items):
+    recent_items = items[-7:] if len(items) >= 7 else items
+    emotions_summary = {'joy': 0, 'sadness': 0, 'anger': 0, 'anxiety': 0, 'calmness': 0}
+    
+    for item in recent_items:
+        for emotion in emotions_summary:
+            emotions_summary[emotion] += item[emotion]
+    
+    dominant_emotion = max(emotions_summary, key=emotions_summary.get)
+    
+    metaphors = {
+        'joy': '☀️ Bright sunshine, blooming flowers, soaring birds',
+        'sadness': '🌧️ Rainy sky, calm lake, falling leaves',
+        'anger': '🔥 Burning flames, storm, rough waves',
+        'anxiety': '🌀 Dark maze, tangled threads, flickering flame',
+        'calmness': '🌊 Calm sea, peaceful forest, sky above clouds'
+    }
+    
+    return f"""
+🎨 **Your Emotional Metaphor:**
+
+Dominant Emotion: {dominant_emotion.upper()}
+Symbol: {metaphors[dominant_emotion]}
+
+This image represents the symbolic expression of emotions from your unconscious.
+Through images like {metaphors[dominant_emotion]}, 
+you can visualize and understand your inner feelings.
+"""
+
 def calc_average_total_score(items):
     return round(sum(item["total_score"] for item in items) / len(items), 2) if items else 0
 
@@ -261,24 +491,13 @@ def calc_keyword_count(items):
     return keyword_count
 
 def gemini_chat(prompt):
-    """Gemini API 호출"""
     try:
         st.info("🤖 Gemini API 호출 중...")
         response = model.generate_content(prompt)
-        response_text = response.text
         st.success("✅ Gemini API 응답 받음")
-        
-        # JSON 블록만 추출
-        json_match = re.search(r'\{.*?\}', response_text, re.DOTALL)
-        if json_match:
-            return json_match.group(0)
-        else:
-            st.warning("⚠️ 응답에서 JSON 형식을 찾을 수 없음")
-            return response_text
+        return response.text
     except Exception as e:
         st.error(f"❌ Gemini API 오류: {e}")
-        import traceback
-        st.error(f"상세 오류:\n```\n{traceback.format_exc()}\n```")
         return None
 
 def sentiment_analysis(content):
@@ -287,7 +506,6 @@ def sentiment_analysis(content):
     ---
     {content}
     ---
-    **중요**: 응답은 반드시 유효한 JSON 형식으로만 반환하세요. 추가 설명이나 주석을 포함시키지 마세요.
     형식:
     {{
       "keywords": ["키워드1", "키워드2", "키워드3", "키워드4", "키워드5"],
@@ -304,17 +522,16 @@ def sentiment_analysis(content):
         response_text = gemini_chat(prompt)
         if response_text:
             st.info(f"📝 Gemini 응답 (처음 100자): {response_text[:100]}...")
-            try:
-                result = json.loads(response_text)
+            start = response_text.find('{')
+            end = response_text.rfind('}') + 1
+            if start >= 0 and end > start:
+                json_text = response_text[start:end]
+                st.info(f"🔍 추출된 JSON: {json_text[:100]}...")
+                result = json.loads(json_text)
                 st.success("✅ 감정 분석 완료!")
                 return result
-            except json.JSONDecodeError as e:
-                st.error(f"JSON 파싱 오류: {e}")
-                st.error(f"응답 내용 (처음 200자): {response_text[:200]}...")
     except Exception as e:
         st.error(f"❌ 분석 오류: {e}")
-        import traceback
-        st.error(traceback.format_exc())
     
     st.warning("⚠️ 기본 감정 점수 사용")
     return {"keywords": ["일기", "오늘", "하루", "생각", "마음"],
@@ -325,7 +542,6 @@ def generate_message(today_data, recent_data):
     일기 앱 AI입니다. 따뜻한 메시지를 JSON으로 생성하세요.
     오늘: {today_data}
     최근: {recent_data}
-    **중요**: 응답은 반드시 유효한 JSON 형식으로만 반환하세요. 추가 설명이나 주석을 포함시키지 마세요.
     형식: {{"message": "응원 메시지 😊"}}
     """
     
@@ -333,263 +549,18 @@ def generate_message(today_data, recent_data):
     try:
         response_text = gemini_chat(prompt)
         if response_text:
-            try:
-                data = json.loads(response_text)
+            start = response_text.find('{')
+            end = response_text.rfind('}') + 1
+            if start >= 0 and end > start:
+                data = json.loads(response_text[start:end])
                 st.success("✅ 메시지 생성 완료!")
                 return data["message"]
-            except json.JSONDecodeError as e:
-                st.error(f"JSON 파싱 오류: {e}")
-                st.error(f"응답 내용 (처음 200자): {response_text[:200]}...")
-    except Exception as e:
-        st.warning(f"⚠️ 메시지 생성 실패: {e}")
+    except:
+        pass
     
     return "오늘도 일기를 써주셔서 감사해요! 😊"
 
-def set_korean_font():
-    """한글 폰트 설정"""
-    try:
-        # Matplotlib 폰트 캐시 갱신
-        fm._rebuild()
-        font_list = [f.name for f in fm.fontManager.ttflist]
-        korean_fonts = ['NanumGothic', 'Malgun Gothic', 'AppleGothic', 'DejaVu Sans']
-        
-        selected_font = None
-        for font in korean_fonts:
-            if font in font_list:
-                selected_font = font
-                plt.rcParams['font.family'] = font
-                st.sidebar.info(f"✅ 한글 폰트 설정됨: {font}")
-                break
-        
-        if not selected_font:
-            st.sidebar.warning("⚠️ 한글 폰트를 찾을 수 없음. 기본 폰트(sans-serif) 사용")
-            plt.rcParams['font.family'] = 'sans-serif'
-        
-        plt.rcParams['axes.unicode_minus'] = False
-    except Exception as e:
-        st.sidebar.error(f"❌ 폰트 설정 오류: {e}")
-        plt.rcParams['font.family'] = 'sans-serif'
-        plt.rcParams['axes.unicode_minus'] = False
-
-def create_emotion_flow_chart(items):
-    """감정 흐름 그래프 생성"""
-    set_korean_font()
-    
-    fig, ax = plt.subplots(figsize=(12, 6))
-    
-    dates = [item['date'][-5:] for item in items[-14:]]
-    joy = [item['joy'] for item in items[-14:]]
-    sadness = [item['sadness'] for item in items[-14:]]
-    anger = [item['anger'] for item in items[-14:]]
-    anxiety = [item['anxiety'] for item in items[-14:]]
-    calmness = [item['calmness'] for item in items[-14:]]
-    
-    ax.plot(dates, joy, marker='o', label='기쁨', color='#FFD700', linewidth=2)
-    ax.plot(dates, sadness, marker='o', label='슬픔', color='#4169E1', linewidth=2)
-    ax.plot(dates, anger, marker='o', label='분노', color='#DC143C', linewidth=2)
-    ax.plot(dates, anxiety, marker='o', label='불안', color='#FF8C00', linewidth=2)
-    ax.plot(dates, calmness, marker='o', label='평온', color='#32CD32', linewidth=2)
-    
-    ax.set_xlabel('날짜', fontsize=12)
-    ax.set_ylabel('감정 점수', fontsize=12)
-    ax.set_title('감정 흐름 분석 (최근 2주)', fontsize=14, fontweight='bold')
-    ax.legend(loc='best')
-    ax.grid(True, alpha=0.3)
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    
-    buf = BytesIO()
-    plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
-    buf.seek(0)
-    plt.close()
-    
-    return buf
-
-def create_emotion_network(items):
-    """감정 연관망 그래프 생성"""
-    set_korean_font()
-    
-    recent_items = items[-30:]
-    
-    emotions = {
-        '기쁨': [item['joy'] for item in recent_items],
-        '슬픔': [item['sadness'] for item in recent_items],
-        '분노': [item['anger'] for item in recent_items],
-        '불안': [item['anxiety'] for item in recent_items],
-        '평온': [item['calmness'] for item in recent_items]
-    }
-    
-    G = nx.Graph()
-    
-    emotion_names = list(emotions.keys())
-    for emotion in emotion_names:
-        G.add_node(emotion)
-    
-    import numpy as np
-    for i, e1 in enumerate(emotion_names):
-        for j, e2 in enumerate(emotion_names):
-            if i < j:
-                corr = np.corrcoef(emotions[e1], emotions[e2])[0, 1]
-                if abs(corr) > 0.3:
-                    G.add_edge(e1, e2, weight=abs(corr))
-    
-    fig, ax = plt.subplots(figsize=(10, 8))
-    pos = nx.spring_layout(G, k=2, iterations=50)
-    
-    node_colors = ['#FFD700', '#4169E1', '#DC143C', '#FF8C00', '#32CD32']
-    nx.draw_networkx_nodes(G, pos, node_color=node_colors, 
-                          node_size=3000, alpha=0.9, ax=ax)
-    
-    edges = G.edges()
-    weights = [G[u][v]['weight'] for u, v in edges]
-    nx.draw_networkx_edges(G, pos, width=[w*5 for w in weights], 
-                          alpha=0.5, ax=ax)
-    
-    nx.draw_networkx_labels(G, pos, font_size=14, 
-                           font_weight='bold', ax=ax)
-    
-    ax.set_title('감정 연관망 분석', fontsize=16, fontweight='bold', pad=20)
-    ax.axis('off')
-    plt.tight_layout()
-    
-    buf = BytesIO()
-    plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
-    buf.seek(0)
-    plt.close()
-    
-    return buf
-
-def create_metaphor_image_prompt(items):
-    """예술치료사용 메타포 이미지 프롬프트 생성"""
-    recent_items = items[-7:]
-    
-    all_keywords = []
-    emotions_summary = {'joy': 0, 'sadness': 0, 'anger': 0, 'anxiety': 0, 'calmness': 0}
-    
-    for item in recent_items:
-        all_keywords.extend(item['keywords'])
-        for emotion in emotions_summary:
-            emotions_summary[emotion] += item[emotion]
-    
-    dominant_emotion = max(emotions_summary, key=emotions_summary.get)
-    
-    emotion_metaphors = {
-        'joy': '밝은 햇살, 피어나는 꽃, 날아오르는 새',
-        'sadness': '비 내리는 하늘, 고요한 호수, 떨어지는 나뭇잎',
-        'anger': '타오르는 불꽃, 폭풍우, 거친 파도',
-        'anxiety': '어두운 미로, 꼬인 실타래, 흔들리는 불꽃',
-        'calmness': '잔잔한 바다, 평화로운 숲, 구름 위의 하늘'
-    }
-    
-    prompt = f"""
-당신의 최근 감정 상태를 상징하는 이미지 메타포:
-
-주요 감정: {dominant_emotion}
-상징: {emotion_metaphors[dominant_emotion]}
-
-이 이미지는 당신의 무의식에서 표현되는 감정의 상징입니다.
-{emotion_metaphors[dominant_emotion]}와 같은 이미지를 통해 
-내면의 감정을 시각화하고 이해할 수 있습니다.
-"""
-    
-    return prompt
-
-def create_goal_flowchart(items):
-    """창업투자자용 목표 달성 흐름차트"""
-    set_korean_font()
-    
-    fig, ax = plt.subplots(figsize=(12, 8))
-    
-    recent_items = items[-14:]
-    
-    dates = [item['date'][-5:] for item in recent_items]
-    scores = [item['total_score'] for item in recent_items]
-    
-    ax.plot(dates, scores, marker='o', color='#1E90FF', linewidth=3, 
-            markersize=10, label='동기/에너지 수준')
-    
-    avg_score = sum(scores) / len(scores)
-    ax.axhline(y=avg_score, color='r', linestyle='--', linewidth=2, 
-               alpha=0.7, label=f'평균: {avg_score:.1f}')
-    
-    ax.axhline(y=8, color='g', linestyle='--', linewidth=2, 
-               alpha=0.5, label='목표 수준: 8.0')
-    
-    ax.fill_between(range(len(dates)), scores, avg_score, 
-                    where=[s >= avg_score for s in scores],
-                    alpha=0.3, color='green', label='상승 구간')
-    ax.fill_between(range(len(dates)), scores, avg_score,
-                    where=[s < avg_score for s in scores],
-                    alpha=0.3, color='red', label='하락 구간')
-    
-    ax.set_xlabel('날짜', fontsize=12)
-    ax.set_ylabel('동기/에너지 수준', fontsize=12)
-    ax.set_title('목표 달성 동기 변화 분석', fontsize=14, fontweight='bold')
-    ax.legend(loc='best')
-    ax.grid(True, alpha=0.3)
-    ax.set_ylim([0, 10])
-    plt.xticks(range(len(dates)), dates, rotation=45)
-    plt.tight_layout()
-    
-    buf = BytesIO()
-    plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
-    buf.seek(0)
-    plt.close()
-    
-    return buf
-
-@st.cache_data
-def load_expert_advice_from_sheets(date_str):
-    """특정 날짜의 전문가 조언 불러오기"""
-    try:
-        records = expert_worksheet.get_all_records()
-        advice_data = {}
-        
-        for record in records:
-            if record.get('date') == date_str:
-                expert_type = record.get('expert_type', '')
-                advice_data[expert_type] = {
-                    'advice': record.get('advice', ''),
-                    'has_content': record.get('has_content', 'False') == 'True',
-                    'created_at': record.get('created_at', '')
-                }
-        
-        return advice_data
-    except Exception as e:
-        st.error(f"조언 로드 오류: {e}")
-        return {}
-
-def save_expert_advice_to_sheets(date_str, expert_type, advice, has_content):
-    """전문가 조언을 Google Sheets에 저장"""
-    try:
-        all_values = expert_worksheet.get_all_values()
-        row_index = None
-        
-        for idx, row in enumerate(all_values[1:], start=2):
-            if len(row) >= 2 and row[0] == date_str and row[1] == expert_type:
-                row_index = idx
-                break
-        
-        row_data = [
-            str(date_str),
-            str(expert_type),
-            str(advice),
-            str(has_content),
-            datetime.now().isoformat()
-        ]
-        
-        if row_index:
-            expert_worksheet.update(f'A{row_index}:E{row_index}', [row_data])
-        else:
-            expert_worksheet.append_row(row_data)
-        
-        return True
-    except Exception as e:
-        st.error(f"조언 저장 오류: {e}")
-        return False
-
 def get_expert_advice(expert_type, diary_data):
-    """전문가 조언 생성"""
     sorted_diaries = sorted(diary_data.values(), key=lambda x: x['date'])
     recent_diaries = sorted_diaries[-30:]
     
@@ -601,188 +572,16 @@ def get_expert_advice(expert_type, diary_data):
     diary_text = "\n".join(diary_summary)
     
     expert_prompts = {
-        "심리상담사": f"""
-당신은 경험 많은 심리상담사입니다.
-다음은 사용자의 최근 일기 내용입니다 (시간순):
-
-{diary_text}
-
-위 일기들을 분석하여:
-1. 감정 패턴과 심리 상태 분석
-2. 반복되는 스트레스 요인 파악
-3. 심리적 건강을 위한 구체적 조언
-4. 필요시 전문가 상담 권유
-
-조언할 내용이 있으면 따뜻하고 공감적인 톤으로 작성하세요.
-조언할 특별한 내용이 없다면 "현재 심리적으로 안정적인 상태로 보입니다."라고 답변하세요.
-
-**중요**: 응답은 반드시 유효한 JSON 형식으로만 반환하세요. 추가 설명이나 주석을 포함시키지 마세요.
-형식: {{"advice": "조언 내용", "has_content": true/false}}
-""",
-        "재정관리사": f"""
-당신은 전문 재정관리사입니다.
-다음은 사용자의 최근 일기 내용입니다 (시간순):
-
-{diary_text}
-
-위 일기들에서 금전, 소비, 지출, 저축, 투자 등 재정 관련 내용을 찾아 분석하여:
-1. 소비 패턴 분석
-2. 재정 스트레스 요인 파악
-3. 재정 건강을 위한 구체적 조언
-4. 저축이나 지출 개선 방안
-
-재정 관련 내용이 있으면 전문적이고 실용적인 조언을 제공하세요.
-재정 관련 내용이 없거나 미미하다면 "일기에서 재정 관련 내용을 찾을 수 없습니다."라고 답변하세요.
-
-**중요**: 응답은 반드시 유효한 JSON 형식으로만 반환하세요. 추가 설명이나 주석을 포함시키지 마세요.
-형식: {{"advice": "조언 내용", "has_content": true/false}}
-""",
-        "변호사": f"""
-당신은 경험 많은 변호사입니다.
-다음은 사용자의 최근 일기 내용입니다 (시간순):
-
-{diary_text}
-
-위 일기들에서 법적 문제, 계약, 분쟁, 권리 침해 등 법률 관련 내용을 찾아 분석하여:
-1. 잠재적 법적 이슈 파악
-2. 권리 보호 방안
-3. 법적 주의사항
-4. 필요시 전문 법률 상담 권유
-
-법적 문제가 있으면 신중하고 전문적인 조언을 제공하세요.
-법적 문제가 없다면 "일기에서 법적 조언이 필요한 내용을 찾을 수 없습니다."라고 답변하세요.
-
-**중요**: 응답은 반드시 유효한 JSON 형식으로만 반환하세요. 추가 설명이나 주석을 포함시키지 마세요.
-형식: {{"advice": "조언 내용", "has_content": true/false}}
-""",
-        "의사": f"""
-당신은 경험 많은 종합병원 의사입니다.
-다음은 사용자의 최근 일기 내용입니다 (시간순):
-
-{diary_text}
-
-위 일기들에서 건강, 질병, 증상, 통증, 수면 등 의학 관련 내용을 찾아 분석하여:
-1. 건강 상태 패턴 분석
-2. 주의해야 할 증상
-3. 생활습관 개선 조언
-4. 필요시 병원 진료 권유
-
-건강 관련 내용이 있으면 의학적으로 신중한 조언을 제공하세요.
-건강 문제가 없다면 "일기에서 특별한 건강 문제를 찾을 수 없습니다. 건강한 상태를 유지하세요."라고 답변하세요.
-
-**중요**: 응답은 반드시 유효한 JSON 형식으로만 반환하세요. 추가 설명이나 주석을 포함시키지 마세요.
-형식: {{"advice": "조언 내용", "has_content": true/false}}
-""",
-        "피부관리사": f"""
-당신은 전문 피부관리사입니다.
-다음은 사용자의 최근 일기 내용입니다 (시간순):
-
-{diary_text}
-
-위 일기들에서 피부, 외모, 미용, 화장품, 피부 트러블 등 관련 내용을 찾아 분석하여:
-1. 피부 고민 파악
-2. 생활습관과 피부 상태 연관성 분석
-3. 피부 관리 조언
-4. 제품 사용이나 관리 팁
-
-피부 관련 내용이 있으면 전문적이고 실용적인 조언을 제공하세요.
-피부 관련 내용이 없다면 "일기에서 피부 관련 고민을 찾을 수 없습니다."라고 답변하세요.
-
-**중요**: 응답은 반드시 유효한 JSON 형식으로만 반환하세요. 추가 설명이나 주석을 포함시키지 마세요.
-형식: {{"advice": "조언 내용", "has_content": true/false}}
-""",
-        "피트니스 트레이너": f"""
-당신은 경험 많은 피트니스 퍼스널 트레이너입니다.
-다음은 사용자의 최근 일기 내용입니다 (시간순):
-
-{diary_text}
-
-위 일기들에서 운동, 다이어트, 체력, 신체활동 등 관련 내용을 찾아 분석하여:
-1. 운동 습관 분석
-2. 체력 및 건강 상태 파악
-3. 운동 루틴 제안
-4. 동기부여 메시지
-
-운동 관련 내용이 있으면 실천 가능한 조언을 제공하세요.
-운동 관련 내용이 없다면 "일기에서 운동 관련 내용을 찾을 수 없습니다. 규칙적인 운동을 시작해보세요!"라고 답변하세요.
-
-**중요**: 응답은 반드시 유효한 JSON 형식으로만 반환하세요. 추가 설명이나 주석을 포함시키지 마세요.
-형식: {{"advice": "조언 내용", "has_content": true/false}}
-""",
-        "창업 벤처투자자": f"""
-당신은 성공한 창업가이자 벤처투자자입니다.
-다음은 사용자의 최근 일기 내용입니다 (시간순):
-
-{diary_text}
-
-위 일기들에서 사업, 창업, 아이디어, 커리어, 직장, 프로젝트 등 관련 내용을 찾아 분석하여:
-1. 비즈니스 기회 포착
-2. 창업 아이디어 검증
-3. 커리어 개발 조언
-4. 실행 가능한 다음 단계 제안
-
-창업이나 비즈니스 관련 내용이 있으면 실용적이고 구체적인 조언을 제공하세요.
-관련 내용이 없다면 "일기에서 창업이나 비즈니스 관련 내용을 찾을 수 없습니다."라고 답변하세요.
-
-**중요**: 응답은 반드시 유효한 JSON 형식으로만 반환하세요. 추가 설명이나 주석을 포함시키지 마세요.
-형식: {{"advice": "조언 내용", "has_content": true/false}}
-""",
-        "예술치료사": f"""
-당신은 경험 많은 예술치료사이자 문학치료사입니다.
-다음은 사용자의 최근 일기 내용입니다 (시간순):
-
-{diary_text}
-
-위 일기들을 창의적이고 예술적 관점에서 분석하여:
-1. 글쓰기를 통한 감정 표현 패턴 분석
-2. 은유와 상징 해석
-3. 창의적 표현 활동 제안 (그림, 음악, 글쓰기 등)
-4. 예술을 통한 치유 방법 제시
-
-예술적 표현이나 창의적 활동 관련 내용이 있으면 감성적이고 창의적인 조언을 제공하세요.
-관련 내용이 없어도 "일기를 통해 자신을 표현하는 것 자체가 훌륭한 예술 활동입니다."라는 긍정적 메시지를 포함하세요.
-
-**중요**: 응답은 반드시 유효한 JSON 형식으로만 반환하세요. 추가 설명이나 주석을 포함시키지 마세요.
-형식: {{"advice": "조언 내용", "has_content": true}}
-""",
-        "임상심리사": f"""
-당신은 임상심리사이자 정신건강의학과 전문의입니다.
-다음은 사용자의 최근 일기 내용입니다 (시간순):
-
-{diary_text}
-
-위 일기들을 임상적 관점에서 분석하여:
-1. 정신건강 상태 평가 (우울, 불안, 스트레스 수준)
-2. 병리적 징후 여부 확인
-3. 인지 패턴과 사고 왜곡 파악
-4. 전문적 치료나 약물 치료 필요성 판단
-5. 자가 관리 방법과 대처 기술 제안
-
-심각한 정신건강 문제가 의심되면 반드시 전문의 상담을 권유하세요.
-정상 범위라면 "현재 정신건강은 양호한 상태입니다."라고 답변하되, 예방적 관리 방법도 제시하세요.
-
-**중요**: 응답은 반드시 유효한 JSON 형식으로만 반환하세요. 추가 설명이나 주석을 포함시키지 마세요.
-형식: {{"advice": "조언 내용", "has_content": true}}
-""",
-        "조직심리 전문가": f"""
-당신은 조직심리 전문가이자 HR 코치입니다.
-다음은 사용자의 최근 일기 내용입니다 (시간순):
-
-{diary_text}
-
-위 일기들에서 직장, 조직, 팀워크, 리더십, 대인관계, 업무 스트레스 등 관련 내용을 찾아 분석하여:
-1. 조직 내 관계 패턴 분석
-2. 업무 스트레스 요인 파악
-3. 리더십 및 커뮤니케이션 개선 방안
-4. 워크라이프 밸런스 조언
-5. 경력 개발 및 성장 전략
-
-직장 관련 내용이 있으면 조직심리학 관점에서 구체적인 조언을 제공하세요.
-직장 관련 내용이 없다면 "일기에서 조직이나 직장 관련 내용을 찾을 수 없습니다."라고 답변하세요.
-
-**중요**: 응답은 반드시 유효한 JSON 형식으로만 반환하세요. 추가 설명이나 주석을 포함시키지 마세요.
-형식: {{"advice": "조언 내용", "has_content": true/false}}
-"""
+        "심리상담사": f"당신은 경험 많은 심리상담사입니다.\n\n{diary_text}\n\n위 일기들을 분석하여 감정 패턴, 스트레스 요인, 심리적 건강 조언을 JSON으로: {{\"advice\": \"조언\", \"has_content\": true/false}}",
+        "재정관리사": f"당신은 전문 재정관리사입니다.\n\n{diary_text}\n\n재정 관련 내용을 찾아 소비 패턴, 재정 조언을 JSON으로: {{\"advice\": \"조언\", \"has_content\": true/false}}",
+        "변호사": f"당신은 경험 많은 변호사입니다.\n\n{diary_text}\n\n법적 문제를 찾아 조언을 JSON으로: {{\"advice\": \"조언\", \"has_content\": true/false}}",
+        "의사": f"당신은 종합병원 의사입니다.\n\n{diary_text}\n\n건강 관련 내용을 찾아 조언을 JSON으로: {{\"advice\": \"조언\", \"has_content\": true/false}}",
+        "피부관리사": f"당신은 전문 피부관리사입니다.\n\n{diary_text}\n\n피부 관련 내용을 찾아 조언을 JSON으로: {{\"advice\": \"조언\", \"has_content\": true/false}}",
+        "피트니스 트레이너": f"당신은 피트니스 트레이너입니다.\n\n{diary_text}\n\n운동 관련 내용을 찾아 조언을 JSON으로: {{\"advice\": \"조언\", \"has_content\": true/false}}",
+        "창업 벤처투자자": f"당신은 성공한 창업가입니다.\n\n{diary_text}\n\n비즈니스 관련 내용을 찾아 조언을 JSON으로: {{\"advice\": \"조언\", \"has_content\": true/false}}",
+        "예술치료사": f"당신은 예술치료사입니다.\n\n{diary_text}\n\n창의적 표현 활동을 제안하는 조언을 JSON으로: {{\"advice\": \"조언\", \"has_content\": true}}",
+        "임상심리사": f"당신은 임상심리사입니다.\n\n{diary_text}\n\n정신건강 상태를 평가하는 조언을 JSON으로: {{\"advice\": \"조언\", \"has_content\": true}}",
+        "조직심리 전문가": f"당신은 조직심리 전문가입니다.\n\n{diary_text}\n\n직장 관련 내용을 찾아 조언을 JSON으로: {{\"advice\": \"조언\", \"has_content\": true/false}}"
     }
     
     prompt = expert_prompts.get(expert_type, "")
@@ -791,17 +590,14 @@ def get_expert_advice(expert_type, diary_data):
         with st.spinner(f'🤖 {expert_type} 분석 중...'):
             response_text = gemini_chat(prompt)
             if response_text:
-                try:
-                    result = json.loads(response_text)
+                start = response_text.find('{')
+                end = response_text.rfind('}') + 1
+                if start >= 0 and end > start:
+                    json_text = response_text[start:end]
+                    result = json.loads(json_text)
                     return result
-                except json.JSONDecodeError as e:
-                    st.error(f"JSON 파싱 오류: {e}")
-                    st.error(f"응답 내용 (처음 200자): {response_text[:200]}...")
-                    return {"advice": "조언을 생성할 수 없습니다. 응답 형식이 올바르지 않습니다.", "has_content": False}
     except Exception as e:
         st.error(f"분석 오류: {e}")
-        import traceback
-        st.error(f"상세 오류:\n```\n{traceback.format_exc()}\n```")
     
     return {"advice": "조언을 생성할 수 없습니다.", "has_content": False}
 
@@ -810,53 +606,59 @@ def calc_total_score(item):
              2 * item["sadness"] - 1.5 * item["anxiety"] - 1.5 * item["anger"] + 50)
     return round(score / 8.5, 2)
 
-def render_expert_tab(tab, expert_name, expert_caption, expert_type, items, selected_date, saved_advice):
-    """전문가 탭 렌더링"""
-    with tab:
-        st.markdown(f"### {expert_name}")
-        st.caption(expert_caption)
-        
-        if expert_type in saved_advice:
-            st.success(f"📋 저장된 조언 ({saved_advice[expert_type]['created_at'][:10]})")
-            st.markdown(saved_advice[expert_type]["advice"])
-            st.divider()
-        
-        if st.button(f"💬 {expert_type} 조언 받기", key=f"btn_{expert_type}", use_container_width=True):
-            if expert_type == "심리상담사" and len(items) >= 2:
-                with st.spinner("📊 감정 흐름 그래프 생성 중..."):
-                    emotion_flow = create_emotion_flow_chart(items)
-                    st.image(emotion_flow, caption="감정 흐름 분석", use_container_width=True)
-                with st.spinner("🕸️ 감정 연관망 생성 중..."):
-                    emotion_network = create_emotion_network(items)
-                    st.image(emotion_network, caption="감정 연관망", use_container_width=True)
-            elif expert_type == "창업 벤처투자자" and len(items) >= 2:
-                with st.spinner("📊 목표 달성 흐름 분석 중..."):
-                    goal_chart = create_goal_flowchart(items)
-                    st.image(goal_chart, caption="목표 달성 동기 변화", use_container_width=True)
-            elif expert_type == "예술치료사" and len(items) >= 1:
-                metaphor_text = create_metaphor_image_prompt(items)
-                st.info("🎨 **당신의 감정 메타포:**")
-                st.markdown(metaphor_text)
-            
-            result = get_expert_advice(expert_type, data)
-            if result["has_content"]:
-                st.success(f"**{expert_type}의 조언:**")
-                st.markdown(result["advice"])
-                save_expert_advice_to_sheets(selected_date, expert_type,
-                                            result["advice"], result["has_content"])
-                st.success("💾 조언이 저장되었습니다")
-            else:
-                st.info(result["advice"])
+def compare_periods(items):
+    """기간별 비교 분석"""
+    if len(items) < 14:
+        return None
+    
+    # 최근 1주와 이전 1주 비교
+    recent_week = items[-7:]
+    prev_week = items[-14:-7]
+    
+    def calc_avg(period):
+        return {
+            'joy': sum(i['joy'] for i in period) / len(period),
+            'sadness': sum(i['sadness'] for i in period) / len(period),
+            'anger': sum(i['anger'] for i in period) / len(period),
+            'anxiety': sum(i['anxiety'] for i in period) / len(period),
+            'calmness': sum(i['calmness'] for i in period) / len(period),
+            'total': sum(i['total_score'] for i in period) / len(period)
+        }
+    
+    recent_avg = calc_avg(recent_week)
+    prev_avg = calc_avg(prev_week)
+    
+    comparison = {}
+    for key in recent_avg:
+        diff = recent_avg[key] - prev_avg[key]
+        comparison[key] = {
+            'recent': recent_avg[key],
+            'previous': prev_avg[key],
+            'diff': diff,
+            'trend': '상승' if diff > 0.5 else ('하락' if diff < -0.5 else '유지')
+        }
+    
+    return comparison
 
 # 메인 화면
 st.title("📱 감정 일기")
 st.caption("AI가 분석하는 나만의 감정 기록 ☁️")
 
-tab1, tab2, tab3, tab4 = st.tabs(["✍️ 쓰기", "📊 통계", "📈 그래프", "👨‍⚕️ 전문가 조언"])
+# 알림 확인
+unread_reminders = load_unread_reminders()
+if unread_reminders:
+    st.warning(f"🔔 {len(unread_reminders)}개의 새 알림이 있습니다!")
+    with st.expander("알림 보기", expanded=True):
+        for reminder in unread_reminders:
+            st.info(f"📅 {reminder['date']}: {reminder['message']}")
+            if st.button(f"확인 완료", key=f"read_{reminder['date']}_{reminder['reminder_type']}"):
+                mark_reminder_as_read(reminder['date'], reminder['reminder_type'])
+                st.rerun()
+
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["✍️ 쓰기", "📊 통계", "📈 그래프", "👨‍⚕️ 전문가 조언", "🔔 알림/비교"])
 
 with tab1:
     st.subheader("오늘의 마음")
-    
     data, items = get_latest_data()
     
     if 'selected_date' not in st.session_state:
@@ -879,12 +681,8 @@ with tab1:
     if data:
         st.success(f"☁️ {len(data)}개의 일기가 클라우드에 저장되어 있습니다")
     
-    content = st.text_area(
-        "📝 오늘 하루는 어땠나요?", 
-        default_content, 
-        height=200,
-        placeholder="자유롭게 마음을 적어보세요..."
-    )
+    content = st.text_area("📝 오늘 하루는 어땠나요?", default_content, height=200,
+                           placeholder="자유롭게 마음을 적어보세요...")
     
     col1, col2 = st.columns([3, 1])
     with col1:
@@ -1035,7 +833,7 @@ with tab3:
 
 with tab4:
     st.subheader("👨‍⚕️ 전문가 조언")
-    st.caption("일기 내용을 시간순으로 분석하여 전문가 관점의 조언을 제공합니다")
+    st.caption("일기 내용을 시간순으로 분석하여 전문가 조언을 제공합니다")
     
     data, items = get_latest_data()
     
@@ -1046,57 +844,142 @@ with tab4:
         
         st.markdown("### 📅 조언 확인 날짜 선택")
         available_dates = sorted([item['date'] for item in items], reverse=True)
-        selected_advice_date = st.selectbox(
-            "날짜를 선택하세요 (이전 조언을 다시 볼 수 있습니다)",
-            options=available_dates,
-            index=0
-        )
+        selected_advice_date = st.selectbox("날짜를 선택하세요", options=available_dates, index=0)
         
         saved_advice = load_expert_advice_from_sheets(selected_advice_date)
-        
         if saved_advice:
-            st.info(f"💾 {selected_advice_date}에 저장된 조언이 {len(saved_advice)}개 있습니다")
+            st.info(f"💾 {selected_advice_date}에 저장된 조언: {len(saved_advice)}개")
         
         st.divider()
         
         expert_tabs = st.tabs([
-            "🧠 심리상담사",
-            "💰 재정관리사", 
-            "⚖️ 변호사",
-            "🏥 의사",
-            "✨ 피부관리사",
-            "💪 피트니스",
-            "🚀 창업투자",
-            "🎨 예술치료",
-            "🧬 임상심리",
-            "👔 조직/HR"
+            "🧠 심리상담", "💰 재정", "⚖️ 변호사", "🏥 의사", "✨ 피부",
+            "💪 피트니스", "🚀 창업", "🎨 예술", "🧬 임상", "👔 조직"
         ])
         
-        expert_configs = [
-            ("🧠 심리상담사", "감정 패턴과 심리 상태를 분석합니다", "심리상담사"),
-            ("💰 재정관리사", "소비 패턴과 재정 상태를 분석합니다", "재정관리사"),
-            ("⚖️ 변호사", "법적 이슈와 권리 보호를 검토합니다", "변호사"),
-            ("🏥 의사", "건강 상태와 생활습관을 점검합니다", "의사"),
-            ("✨ 피부관리사", "피부 고민과 관리 방법을 제안합니다", "피부관리사"),
-            ("💪 피트니스 트레이너", "운동 습관과 체력 관리를 분석합니다", "피트니스 트레이너"),
-            ("🚀 창업 벤처투자자", "비즈니스 기회와 커리어를 분석합니다", "창업 벤처투자자"),
-            ("🎨 예술치료사 / 문학치료사", "창의적 표현과 예술을 통한 치유를 제안합니다", "예술치료사"),
-            ("🧬 임상심리사 / 정신건강의학과 의사", "정신건강을 임상적 관점에서 평가합니다", "임상심리사"),
-            ("👔 조직심리 전문가 / HR 코치", "직장 생활과 조직 내 관계를 분석합니다", "조직심리 전문가")
+        experts_info = [
+            ("심리상담사", "🧠", True),
+            ("재정관리사", "💰", False),
+            ("변호사", "⚖️", False),
+            ("의사", "🏥", False),
+            ("피부관리사", "✨", False),
+            ("피트니스 트레이너", "💪", False),
+            ("창업 벤처투자자", "🚀", True),
+            ("예술치료사", "🎨", False),
+            ("임상심리사", "🧬", True),
+            ("조직심리 전문가", "👔", False)
         ]
         
-        for i, (expert_name, expert_caption, expert_type) in enumerate(expert_configs):
-            render_expert_tab(expert_tabs[i], expert_name, expert_caption, expert_type, 
-                            items, selected_advice_date, saved_advice)
+        for idx, (expert_name, icon, show_chart) in enumerate(experts_info):
+            with expert_tabs[idx]:
+                st.markdown(f"### {icon} {expert_name}")
+                
+                if expert_name in saved_advice:
+                    st.success(f"📋 저장된 조언 ({saved_advice[expert_name]['created_at'][:10]})")
+                    st.markdown(saved_advice[expert_name]["advice"])
+                    st.divider()
+                
+                if st.button(f"💬 {expert_name} 조언 받기", key=f"btn_{expert_name}", use_container_width=True):
+                    if show_chart and len(items) >= 2:
+                        if expert_name in ["심리상담사", "임상심리사"]:
+                            flow_chart = create_emotion_flow_chart(items)
+                            if flow_chart:
+                                st.image(flow_chart, caption="Emotion Flow", use_container_width=True)
+                            network_chart = create_emotion_network(items)
+                            if network_chart:
+                                st.image(network_chart, caption="Emotion Network", use_container_width=True)
+                        elif expert_name == "창업 벤처투자자":
+                            goal_chart = create_goal_flowchart(items)
+                            if goal_chart:
+                                st.image(goal_chart, caption="Goal Flow", use_container_width=True)
+                    
+                    if expert_name == "예술치료사":
+                        metaphor = create_metaphor_prompt(items)
+                        st.info(metaphor)
+                    
+                    result = get_expert_advice(expert_name, data)
+                    if result.get("has_content"):
+                        st.success(f"**{expert_name}의 조언:**")
+                        st.markdown(result["advice"])
+                        save_expert_advice_to_sheets(selected_advice_date, expert_name, 
+                                                    result["advice"], result["has_content"])
+                        st.success("💾 조언이 저장되었습니다")
+                    else:
+                        st.info(result["advice"])
         
         st.divider()
-        st.warning("⚠️ **주의사항**: 이 조언은 AI가 생성한 것으로 참고용입니다. 전문적인 상담이나 치료가 필요한 경우 반드시 해당 분야 전문가와 상담하세요.")
+        st.warning("⚠️ **주의**: AI 조언은 참고용입니다. 전문가 상담이 필요한 경우 반드시 전문의와 상담하세요.")
+
+with tab5:
+    st.subheader("🔔 알림 관리 & 📊 기간별 비교")
+    data, items = get_latest_data()
+    
+    st.markdown("### 🔔 알림 설정")
+    
+    # 알림 체크 및 생성
+    if items:
+        check_and_create_reminders(items)
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("📝 일기 작성 독려 알림 생성", use_container_width=True):
+            save_reminder("수동_독려", "💭 오늘의 감정을 기록해보세요!")
+            st.success("알림이 생성되었습니다!")
+            st.rerun()
+    
+    with col2:
+        if st.button("📊 주간 분석 알림 생성", use_container_width=True):
+            save_reminder("수동_주간분석", "📊 이번 주 감정을 돌아보세요!")
+            st.success("알림이 생성되었습니다!")
+            st.rerun()
+    
+    st.divider()
+    st.markdown("### 📊 기간별 비교 분석")
+    
+    if len(items) >= 14:
+        comparison = compare_periods(items)
+        
+        if comparison:
+            st.write("**📈 최근 1주 vs 이전 1주**")
+            
+            for emotion, data_cmp in comparison.items():
+                if emotion == 'total':
+                    continue
+                
+                emotion_names = {
+                    'joy': '😄 기쁨',
+                    'sadness': '😢 슬픔',
+                    'anger': '😡 분노',
+                    'anxiety': '😰 불안',
+                    'calmness': '😌 평온'
+                }
+                
+                trend_icon = "📈" if data_cmp['trend'] == '상승' else ("📉" if data_cmp['trend'] == '하락' else "➡️")
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric(emotion_names.get(emotion, emotion), 
+                             f"{data_cmp['recent']:.1f}",
+                             f"{data_cmp['diff']:+.1f}")
+                with col2:
+                    st.write(f"이전 주: {data_cmp['previous']:.1f}")
+                with col3:
+                    st.write(f"{trend_icon} {data_cmp['trend']}")
+            
+            st.divider()
+            
+            # 종합 분석
+            total_trend = comparison['total']['trend']
+            if total_trend == '상승':
+                st.success(f"🎉 종합 감정 점수가 상승했습니다! ({comparison['total']['diff']:+.1f}점)")
+            elif total_trend == '하락':
+                st.warning(f"😔 종합 감정 점수가 하락했습니다. ({comparison['total']['diff']:+.1f}점)")
+            else:
+                st.info(f"➡️ 종합 감정 점수가 유지되고 있습니다.")
+    else:
+        st.info("📝 비교 분석을 위해서는 최소 14개의 일기가 필요합니다.")
 
 st.divider()
 st.markdown("### 💝 매일 감정을 기록하며 마음을 돌보세요!")
-st.caption("🤖 AI가 감정을 분석하고 ☁️ 클라우드에 안전하게 보관합니다")
-
-
-
-
+st.caption("🤖 AI 분석 | ☁️ 클라우드 저장 | 🔔 알림 기능")
 
