@@ -1,8 +1,8 @@
-streamlit
-google-generativeai
-gspread
-google-auth
-matplotlib
-networkx
-python-dotenv
-
+streamlit>=1.28.0
+google-generativeai>=0.3.0
+gspread>=5.11.0
+google-auth>=2.23.0
+python-dotenv>=1.0.0
+matplotlib>=3.7.0
+networkx>=3.1
+numpy>=1.24.0
