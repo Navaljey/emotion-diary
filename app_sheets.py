@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import networkx as nx
 from io import BytesIO
-import base64
+import re
 
 # PWA를 위한 HTML 코드
 pwa_html = """
@@ -265,8 +265,16 @@ def gemini_chat(prompt):
     try:
         st.info("🤖 Gemini API 호출 중...")
         response = model.generate_content(prompt)
+        response_text = response.text
         st.success("✅ Gemini API 응답 받음")
-        return response.text
+        
+        # JSON 블록만 추출
+        json_match = re.search(r'\{.*?\}', response_text, re.DOTALL)
+        if json_match:
+            return json_match.group(0)
+        else:
+            st.warning("⚠️ 응답에서 JSON 형식을 찾을 수 없음")
+            return response_text
     except Exception as e:
         st.error(f"❌ Gemini API 오류: {e}")
         import traceback
@@ -279,6 +287,7 @@ def sentiment_analysis(content):
     ---
     {content}
     ---
+    **중요**: 응답은 반드시 유효한 JSON 형식으로만 반환하세요. 추가 설명이나 주석을 포함시키지 마세요.
     형식:
     {{
       "keywords": ["키워드1", "키워드2", "키워드3", "키워드4", "키워드5"],
@@ -295,16 +304,13 @@ def sentiment_analysis(content):
         response_text = gemini_chat(prompt)
         if response_text:
             st.info(f"📝 Gemini 응답 (처음 100자): {response_text[:100]}...")
-            start = response_text.find('{')
-            end = response_text.rfind('}') + 1
-            if start >= 0 and end > start:
-                json_text = response_text[start:end]
-                st.info(f"🔍 추출된 JSON: {json_text[:100]}...")
-                result = json.loads(json_text)
+            try:
+                result = json.loads(response_text)
                 st.success("✅ 감정 분석 완료!")
                 return result
-            else:
-                st.warning("⚠️ JSON 형식을 찾을 수 없음")
+            except json.JSONDecodeError as e:
+                st.error(f"JSON 파싱 오류: {e}")
+                st.error(f"응답 내용 (처음 200자): {response_text[:200]}...")
     except Exception as e:
         st.error(f"❌ 분석 오류: {e}")
         import traceback
@@ -319,6 +325,7 @@ def generate_message(today_data, recent_data):
     일기 앱 AI입니다. 따뜻한 메시지를 JSON으로 생성하세요.
     오늘: {today_data}
     최근: {recent_data}
+    **중요**: 응답은 반드시 유효한 JSON 형식으로만 반환하세요. 추가 설명이나 주석을 포함시키지 마세요.
     형식: {{"message": "응원 메시지 😊"}}
     """
     
@@ -326,12 +333,13 @@ def generate_message(today_data, recent_data):
     try:
         response_text = gemini_chat(prompt)
         if response_text:
-            start = response_text.find('{')
-            end = response_text.rfind('}') + 1
-            if start >= 0 and end > start:
-                data = json.loads(response_text[start:end])
+            try:
+                data = json.loads(response_text)
                 st.success("✅ 메시지 생성 완료!")
                 return data["message"]
+            except json.JSONDecodeError as e:
+                st.error(f"JSON 파싱 오류: {e}")
+                st.error(f"응답 내용 (처음 200자): {response_text[:200]}...")
     except Exception as e:
         st.warning(f"⚠️ 메시지 생성 실패: {e}")
     
@@ -340,19 +348,28 @@ def generate_message(today_data, recent_data):
 def set_korean_font():
     """한글 폰트 설정"""
     try:
+        # Matplotlib 폰트 캐시 갱신
+        fm._rebuild()
         font_list = [f.name for f in fm.fontManager.ttflist]
         korean_fonts = ['NanumGothic', 'Malgun Gothic', 'AppleGothic', 'DejaVu Sans']
         
+        selected_font = None
         for font in korean_fonts:
             if font in font_list:
+                selected_font = font
                 plt.rcParams['font.family'] = font
+                st.sidebar.info(f"✅ 한글 폰트 설정됨: {font}")
                 break
-        else:
+        
+        if not selected_font:
+            st.sidebar.warning("⚠️ 한글 폰트를 찾을 수 없음. 기본 폰트(sans-serif) 사용")
             plt.rcParams['font.family'] = 'sans-serif'
         
         plt.rcParams['axes.unicode_minus'] = False
-    except:
-        pass
+    except Exception as e:
+        st.sidebar.error(f"❌ 폰트 설정 오류: {e}")
+        plt.rcParams['font.family'] = 'sans-serif'
+        plt.rcParams['axes.unicode_minus'] = False
 
 def create_emotion_flow_chart(items):
     """감정 흐름 그래프 생성"""
@@ -599,7 +616,8 @@ def get_expert_advice(expert_type, diary_data):
 조언할 내용이 있으면 따뜻하고 공감적인 톤으로 작성하세요.
 조언할 특별한 내용이 없다면 "현재 심리적으로 안정적인 상태로 보입니다."라고 답변하세요.
 
-JSON 형식으로 답변: {{"advice": "조언 내용", "has_content": true/false}}
+**중요**: 응답은 반드시 유효한 JSON 형식으로만 반환하세요. 추가 설명이나 주석을 포함시키지 마세요.
+형식: {{"advice": "조언 내용", "has_content": true/false}}
 """,
         "재정관리사": f"""
 당신은 전문 재정관리사입니다.
@@ -616,7 +634,8 @@ JSON 형식으로 답변: {{"advice": "조언 내용", "has_content": true/false
 재정 관련 내용이 있으면 전문적이고 실용적인 조언을 제공하세요.
 재정 관련 내용이 없거나 미미하다면 "일기에서 재정 관련 내용을 찾을 수 없습니다."라고 답변하세요.
 
-JSON 형식으로 답변: {{"advice": "조언 내용", "has_content": true/false}}
+**중요**: 응답은 반드시 유효한 JSON 형식으로만 반환하세요. 추가 설명이나 주석을 포함시키지 마세요.
+형식: {{"advice": "조언 내용", "has_content": true/false}}
 """,
         "변호사": f"""
 당신은 경험 많은 변호사입니다.
@@ -633,7 +652,8 @@ JSON 형식으로 답변: {{"advice": "조언 내용", "has_content": true/false
 법적 문제가 있으면 신중하고 전문적인 조언을 제공하세요.
 법적 문제가 없다면 "일기에서 법적 조언이 필요한 내용을 찾을 수 없습니다."라고 답변하세요.
 
-JSON 형식으로 답변: {{"advice": "조언 내용", "has_content": true/false}}
+**중요**: 응답은 반드시 유효한 JSON 형식으로만 반환하세요. 추가 설명이나 주석을 포함시키지 마세요.
+형식: {{"advice": "조언 내용", "has_content": true/false}}
 """,
         "의사": f"""
 당신은 경험 많은 종합병원 의사입니다.
@@ -650,7 +670,8 @@ JSON 형식으로 답변: {{"advice": "조언 내용", "has_content": true/false
 건강 관련 내용이 있으면 의학적으로 신중한 조언을 제공하세요.
 건강 문제가 없다면 "일기에서 특별한 건강 문제를 찾을 수 없습니다. 건강한 상태를 유지하세요."라고 답변하세요.
 
-JSON 형식으로 답변: {{"advice": "조언 내용", "has_content": true/false}}
+**중요**: 응답은 반드시 유효한 JSON 형식으로만 반환하세요. 추가 설명이나 주석을 포함시키지 마세요.
+형식: {{"advice": "조언 내용", "has_content": true/false}}
 """,
         "피부관리사": f"""
 당신은 전문 피부관리사입니다.
@@ -667,7 +688,8 @@ JSON 형식으로 답변: {{"advice": "조언 내용", "has_content": true/false
 피부 관련 내용이 있으면 전문적이고 실용적인 조언을 제공하세요.
 피부 관련 내용이 없다면 "일기에서 피부 관련 고민을 찾을 수 없습니다."라고 답변하세요.
 
-JSON 형식으로 답변: {{"advice": "조언 내용", "has_content": true/false}}
+**중요**: 응답은 반드시 유효한 JSON 형식으로만 반환하세요. 추가 설명이나 주석을 포함시키지 마세요.
+형식: {{"advice": "조언 내용", "has_content": true/false}}
 """,
         "피트니스 트레이너": f"""
 당신은 경험 많은 피트니스 퍼스널 트레이너입니다.
@@ -684,7 +706,8 @@ JSON 형식으로 답변: {{"advice": "조언 내용", "has_content": true/false
 운동 관련 내용이 있으면 실천 가능한 조언을 제공하세요.
 운동 관련 내용이 없다면 "일기에서 운동 관련 내용을 찾을 수 없습니다. 규칙적인 운동을 시작해보세요!"라고 답변하세요.
 
-JSON 형식으로 답변: {{"advice": "조언 내용", "has_content": true/false}}
+**중요**: 응답은 반드시 유효한 JSON 형식으로만 반환하세요. 추가 설명이나 주석을 포함시키지 마세요.
+형식: {{"advice": "조언 내용", "has_content": true/false}}
 """,
         "창업 벤처투자자": f"""
 당신은 성공한 창업가이자 벤처투자자입니다.
@@ -701,7 +724,8 @@ JSON 형식으로 답변: {{"advice": "조언 내용", "has_content": true/false
 창업이나 비즈니스 관련 내용이 있으면 실용적이고 구체적인 조언을 제공하세요.
 관련 내용이 없다면 "일기에서 창업이나 비즈니스 관련 내용을 찾을 수 없습니다."라고 답변하세요.
 
-JSON 형식으로 답변: {{"advice": "조언 내용", "has_content": true/false}}
+**중요**: 응답은 반드시 유효한 JSON 형식으로만 반환하세요. 추가 설명이나 주석을 포함시키지 마세요.
+형식: {{"advice": "조언 내용", "has_content": true/false}}
 """,
         "예술치료사": f"""
 당신은 경험 많은 예술치료사이자 문학치료사입니다.
@@ -718,7 +742,8 @@ JSON 형식으로 답변: {{"advice": "조언 내용", "has_content": true/false
 예술적 표현이나 창의적 활동 관련 내용이 있으면 감성적이고 창의적인 조언을 제공하세요.
 관련 내용이 없어도 "일기를 통해 자신을 표현하는 것 자체가 훌륭한 예술 활동입니다."라는 긍정적 메시지를 포함하세요.
 
-JSON 형식으로 답변: {{"advice": "조언 내용", "has_content": true}}
+**중요**: 응답은 반드시 유효한 JSON 형식으로만 반환하세요. 추가 설명이나 주석을 포함시키지 마세요.
+형식: {{"advice": "조언 내용", "has_content": true}}
 """,
         "임상심리사": f"""
 당신은 임상심리사이자 정신건강의학과 전문의입니다.
@@ -736,7 +761,8 @@ JSON 형식으로 답변: {{"advice": "조언 내용", "has_content": true}}
 심각한 정신건강 문제가 의심되면 반드시 전문의 상담을 권유하세요.
 정상 범위라면 "현재 정신건강은 양호한 상태입니다."라고 답변하되, 예방적 관리 방법도 제시하세요.
 
-JSON 형식으로 답변: {{"advice": "조언 내용", "has_content": true}}
+**중요**: 응답은 반드시 유효한 JSON 형식으로만 반환하세요. 추가 설명이나 주석을 포함시키지 마세요.
+형식: {{"advice": "조언 내용", "has_content": true}}
 """,
         "조직심리 전문가": f"""
 당신은 조직심리 전문가이자 HR 코치입니다.
@@ -754,7 +780,8 @@ JSON 형식으로 답변: {{"advice": "조언 내용", "has_content": true}}
 직장 관련 내용이 있으면 조직심리학 관점에서 구체적인 조언을 제공하세요.
 직장 관련 내용이 없다면 "일기에서 조직이나 직장 관련 내용을 찾을 수 없습니다."라고 답변하세요.
 
-JSON 형식으로 답변: {{"advice": "조언 내용", "has_content": true/false}}
+**중요**: 응답은 반드시 유효한 JSON 형식으로만 반환하세요. 추가 설명이나 주석을 포함시키지 마세요.
+형식: {{"advice": "조언 내용", "has_content": true/false}}
 """
     }
     
@@ -764,12 +791,13 @@ JSON 형식으로 답변: {{"advice": "조언 내용", "has_content": true/false
         with st.spinner(f'🤖 {expert_type} 분석 중...'):
             response_text = gemini_chat(prompt)
             if response_text:
-                start = response_text.find('{')
-                end = response_text.rfind('}') + 1
-                if start >= 0 and end > start:
-                    json_text = response_text[start:end]
-                    result = json.loads(json_text)
+                try:
+                    result = json.loads(response_text)
                     return result
+                except json.JSONDecodeError as e:
+                    st.error(f"JSON 파싱 오류: {e}")
+                    st.error(f"응답 내용 (처음 200자): {response_text[:200]}...")
+                    return {"advice": "조언을 생성할 수 없습니다. 응답 형식이 올바르지 않습니다.", "has_content": False}
     except Exception as e:
         st.error(f"분석 오류: {e}")
         import traceback
@@ -1067,7 +1095,6 @@ with tab4:
 st.divider()
 st.markdown("### 💝 매일 감정을 기록하며 마음을 돌보세요!")
 st.caption("🤖 AI가 감정을 분석하고 ☁️ 클라우드에 안전하게 보관합니다")
-
 
 
 
