@@ -1,4 +1,12 @@
-pip install --upgrade streamlit
+import streamlit as st
+
+# 탭 생성
+tab1, tab2, tab3, tab4 = st.tabs(["Tab 1", "Tab 2", "Tab 3", "Tab 4"])
+
+# tab4 컨텍스트에서 작업
+with tab4:
+    st.write("This is Tab 4 content")
+    
 with tab4:
     st.subheader("👨‍⚕️ 전문가 조언")
     st.caption("일기 내용을 시간순으로 분석하여 전문가 관점의 조언을 제공합니다")
@@ -1398,6 +1406,7 @@ with tab4:
 st.divider()
 st.markdown("### 💝 매일 감정을 기록하며 마음을 돌보세요!")
 st.caption("🤖 AI가 감정을 분석하고 ☁️ 클라우드에 안전하게 보관합니다")
+
 
 
 
