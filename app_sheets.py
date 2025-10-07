@@ -6,6 +6,11 @@ tab1, tab2, tab3, tab4 = st.tabs(["Tab 1", "Tab 2", "Tab 3", "Tab 4"])
 # tab4 컨텍스트에서 작업
 with tab4:
     st.write("This is Tab 4 content")
+
+def get_latest_data():
+    return [], []
+
+data, items = get_latest_data()  # 이제 에러 발생하지 않음
     
 with tab4:
     st.subheader("👨‍⚕️ 전문가 조언")
@@ -1406,6 +1411,7 @@ with tab4:
 st.divider()
 st.markdown("### 💝 매일 감정을 기록하며 마음을 돌보세요!")
 st.caption("🤖 AI가 감정을 분석하고 ☁️ 클라우드에 안전하게 보관합니다")
+
 
 
 
