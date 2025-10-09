@@ -587,17 +587,18 @@ with tab1:
     
     # 음성 입력
     if CLOVA_ENABLED:
-        st.markdown("### 🎤 네이버 클로버 (95%)")
+        st.markdown("### 🎤 네이버 클로버 (인식률 95%)")
         col_v1, col_v2 = st.columns([3, 1])
+        
         with col_v1:
             audio_file = st.audio_input("🎙️ 녹음")
         with col_v2:
-            if audio_file:
+            if audio_file is not None:
                 if st.button("📝 변환", use_container_width=True, type="primary"):
                     with st.spinner("🤖 변환 중..."):
                         text = clova_speech_to_text(audio_file)
                         if not text.startswith("❌"):
-                            st.success("✅ 완료")
+                            st.success("✅ 완료!")
                             st.session_state.voice_text = text
                             st.rerun()
                         else:
@@ -605,30 +606,28 @@ with tab1:
         
         if 'voice_text' in st.session_state and st.session_state.voice_text:
             st.success(f"🎤 {st.session_state.voice_text}")
-            c1, c2 = st.columns(2)
-            with c1:
+            col_a, col_c = st.columns(2)
+            with col_a:
                 if st.button("📋 추가", use_container_width=True):
                     st.session_state.append_voice = True
                     st.rerun()
-            with c2:
+            with col_c:
                 if st.button("🗑️ 지우기", use_container_width=True):
                     st.session_state.voice_text = ""
                     st.rerun()
     
     st.divider()
     
+    # 텍스트 입력
     default_content = ""
     if 'append_voice' in st.session_state and st.session_state.append_voice and 'voice_text' in st.session_state:
-        if diary_exists:
-            default_content = data[date_str]["content"] + "\n\n" + st.session_state.voice_text
-        else:
-            default_content = st.session_state.voice_text
+        default_content = (data[date_str]["content"] + "\n\n" if diary_exists else "") + st.session_state.voice_text
         st.session_state.append_voice = False
         st.session_state.voice_text = ""
     elif diary_exists:
         default_content = data[date_str]["content"]
     
-    content = st.text_area("📝 오늘 하루는?", value=default_content, height=200, placeholder="직접 입력 또는 음성...")
+    content = st.text_area("📝 오늘 하루는?", value=default_content, height=200, placeholder="입력 또는 음성...")
     
     col1, col2 = st.columns([3, 1])
     with col1:
@@ -644,15 +643,15 @@ with tab1:
     
     if 'confirm_delete' in st.session_state and st.session_state.confirm_delete:
         st.warning(f"⚠️ {st.session_state.confirm_delete} 삭제?")
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("✅ 예", type="primary", key="yes"):
+        col_y, col_n = st.columns(2)
+        with col_y:
+            if st.button("✅ 예", type="primary", key="y"):
                 if delete_data_from_sheets(st.session_state.confirm_delete):
                     st.success("🗑️ 삭제됨")
                 del st.session_state.confirm_delete
                 st.rerun()
-        with c2:
-            if st.button("❌ 아니오", key="no"):
+        with col_n:
+            if st.button("❌ 아니오", key="n"):
                 del st.session_state.confirm_delete
                 st.rerun()
         save_clicked = False
@@ -663,68 +662,52 @@ with tab1:
                 analyzed = sentiment_analysis(content)
                 data, items = get_latest_data()
                 
-                today_data = {
-                    "date": date_str, "keywords": analyzed["keywords"],
-                    "joy": analyzed["joy"], "sadness": analyzed["sadness"],
-                    "anger": analyzed["anger"], "anxiety": analyzed["anxiety"],
-                    "calmness": analyzed["calmness"],
-                }
+                today_data = {"date": date_str, "keywords": analyzed["keywords"], "joy": analyzed["joy"], 
+                             "sadness": analyzed["sadness"], "anger": analyzed["anger"], 
+                             "anxiety": analyzed["anxiety"], "calmness": analyzed["calmness"]}
                 
-                recent_data = [{
-                    "date": item["date"], "keywords": item["keywords"],
-                    "joy": item["joy"], "sadness": item["sadness"],
-                    "anger": item["anger"], "anxiety": item["anxiety"],
-                    "calmness": item["calmness"],
-                } for item in items[-7:]]
+                recent_data = [{"date": i["date"], "keywords": i["keywords"], "joy": i["joy"], 
+                               "sadness": i["sadness"], "anger": i["anger"], "anxiety": i["anxiety"], 
+                               "calmness": i["calmness"]} for i in items[-7:]]
                 
                 message = generate_message(today_data, recent_data)
                 
                 new_item = {
-                    "date": date_str, "content": content, 
-                    "keywords": analyzed["keywords"],
+                    "date": date_str, "content": content, "keywords": analyzed["keywords"],
                     "total_score": calc_total_score(analyzed),
                     "joy": analyzed["joy"], "sadness": analyzed["sadness"],
                     "anger": analyzed["anger"], "anxiety": analyzed["anxiety"],
-                    "calmness": analyzed["calmness"], "message": message,
+                    "calmness": analyzed["calmness"], "message": message
                 }
                 
                 if save_data_to_sheets(date_str, new_item):
-                    st.success("✅ 저장됨!")
+                    st.success("✅ 저장!")
                     st.balloons()
                     if 'voice_text' in st.session_state:
                         del st.session_state.voice_text
                     st.rerun()
         else:
-            st.warning("⚠️ 내용 입력 필요")
+            st.warning("⚠️ 내용 입력!")
     
     if 'confirm_delete' not in st.session_state:
         st.divider()
         if diary_exists:
             item = data[date_str]
-            total_score = item["total_score"]
+            ts = item["total_score"]
+            emoji, color = ("😄", "green") if ts >= 8 else ("😊", "blue") if ts >= 6 else ("😐", "orange") if ts >= 4 else ("😢", "red")
             
-            if total_score >= 8:
-                emoji, color = "😄", "green"
-            elif total_score >= 6:
-                emoji, color = "😊", "blue"
-            elif total_score >= 4:
-                emoji, color = "😐", "orange"
-            else:
-                emoji, color = "😢", "red"
-            
-            st.markdown(f"### 🎯 **:{color}[{total_score}/10]** {emoji}")
-            
+            st.markdown(f"### 🎯 점수: **:{color}[{ts}/10]** {emoji}")
+            st.write("**🎭 세부:**")
             cols = st.columns(5)
-            emotions = [("😄", "기쁨", item["joy"]), ("😢", "슬픔", item["sadness"]), 
-                       ("😡", "분노", item["anger"]), ("😰", "불안", item["anxiety"]), ("😌", "평온", item["calmness"])]
-            for i, (e, n, s) in enumerate(emotions):
+            for i, (e, n, s) in enumerate([("😄", "기쁨", item["joy"]), ("😢", "슬픔", item["sadness"]), 
+                                           ("😡", "분노", item["anger"]), ("😰", "불안", item["anxiety"]), 
+                                           ("😌", "평온", item["calmness"])]):
                 with cols[i]:
                     st.metric(f"{e} {n}", f"{s}")
-            
             if item["message"]:
                 st.success(f"💌 {item['message']}")
         else:
-            st.info("💡 일기 작성 시 AI 분석!")
+            st.info("💡 일기를 쓰면 AI가 분석!")
 
 with tab2:
     st.subheader("📊 통계")
@@ -739,18 +722,18 @@ with tab2:
             st.metric("✏️ 글자", f"{calc_char_count(items):,}자")
         with col2:
             st.metric("📚 일기", f"{len(items)}개")
-            st.metric("📅 활동", f"{len(set([i['date'][:7] for i in items]))}개월")
+            st.metric("📅 월", f"{len(set([i['date'][:7] for i in items]))}개월")
         
         st.divider()
         st.write("🏷️ **키워드 TOP 10**")
-        keywords = calc_keyword_count(items)
-        if keywords:
-            sorted_kw = sorted(keywords.items(), key=lambda x: x[1], reverse=True)[:10]
-            for i, (kw, cnt) in enumerate(sorted_kw):
+        kw = calc_keyword_count(items)
+        if kw:
+            sorted_kw = sorted(kw.items(), key=lambda x: x[1], reverse=True)[:10]
+            for i, (k, c) in enumerate(sorted_kw):
                 if i < 3:
-                    st.markdown(f"### {['🥇','🥈','🥉'][i]} **{kw}** `{cnt}회`")
+                    st.markdown(f"### {['🥇','🥈','🥉'][i]} **{k}** `{c}회`")
                 else:
-                    st.markdown(f"**{i+1}.** {kw} `{cnt}회`")
+                    st.markdown(f"**{i+1}.** {k} `{c}회`")
 
 with tab3:
     st.subheader("📈 그래프")
@@ -764,163 +747,143 @@ with tab3:
         st.line_chart(scores, x="날짜", y="점수", height=250)
         
         st.write("**🎭 감정별 변화**")
-        emotions = [{
-            "날짜": i["date"][5:],
-            "😄기쁨": i["joy"], "😌평온": i["calmness"],
-            "😰불안": i["anxiety"], "😢슬픔": i["sadness"], "😡분노": i["anger"],
-        } for i in items[-14:]]
-        st.area_chart(emotions, x="날짜", y=["😄기쁨", "😌평온", "😰불안", "😢슬픔", "😡분노"], height=250)
+        emo = [{"날짜": i["date"][5:], "😄기쁨": i["joy"], "😌평온": i["calmness"],
+               "😰불안": i["anxiety"], "😢슬픔": i["sadness"], "😡분노": i["anger"]} for i in items[-14:]]
+        st.area_chart(emo, x="날짜", y=["😄기쁨", "😌평온", "😰불안", "😢슬픔", "😡분노"], height=250)
 
 with tab4:
-    st.subheader("👨‍⚕️ 전문가 조언")
+    st.subheader("👨‍⚕️ 전문가")
     data, items = get_latest_data()
     
     if not items:
-        st.info("📝 일기 작성 후 이용")
+        st.info("📝 일기 필요")
     else:
         st.success(f"📊 {len(items)}개 분석")
         
-        available_dates = sorted([item['date'] for item in items], reverse=True)
-        selected_date = st.selectbox("📅 날짜", options=available_dates, index=0)
-        saved_advice = load_expert_advice_from_sheets(selected_date)
+        dates = sorted([i['date'] for i in items], reverse=True)
+        sel_date = st.selectbox("📅 날짜", options=dates, index=0)
+        saved = load_expert_advice_from_sheets(sel_date)
         
-        if saved_advice:
-            st.info(f"💾 {len(saved_advice)}개 저장됨")
+        if saved:
+            st.info(f"💾 저장된 조언: {len(saved)}개")
         
         st.divider()
         
-        expert_tabs = st.tabs(["🧠 심리", "💰 재정", "⚖️ 법률", "🏥 의사", "✨ 피부", 
-                               "💪 운동", "🚀 창업", "🎨 예술", "🧬 임상", "👔 조직"])
+        tabs = st.tabs(["🧠 심리", "💰 재정", "⚖️ 법률", "🏥 의사", "✨ 피부", "💪 운동", "🚀 창업", "🎨 예술", "🧬 임상", "👔 조직"])
+        experts = [("심리상담사", "🧠", True), ("재정관리사", "💰", False), ("변호사", "⚖️", False), 
+                  ("의사", "🏥", False), ("피부관리사", "✨", False), ("피트니스 트레이너", "💪", False),
+                  ("창업 벤처투자자", "🚀", True), ("예술치료사", "🎨", False), ("임상심리사", "🧬", True), 
+                  ("조직심리 전문가", "👔", False)]
         
-        experts = [
-            ("심리상담사", "🧠", True, False),
-            ("재정관리사", "💰", False, False),
-            ("변호사", "⚖️", False, False),
-            ("의사", "🏥", False, False),
-            ("피부관리사", "✨", False, False),
-            ("피트니스 트레이너", "💪", False, False),
-            ("창업 벤처투자자", "🚀", True, False),
-            ("예술치료사", "🎨", False, True),
-            ("임상심리사", "🧬", True, False),
-            ("조직심리 전문가", "👔", False, False)
-        ]
-        
-        for idx, (name, icon, show_chart, is_art) in enumerate(experts):
-            with expert_tabs[idx]:
+        for idx, (name, icon, chart) in enumerate(experts):
+            with tabs[idx]:
                 st.markdown(f"### {icon} {name}")
                 
-                if name in saved_advice:
-                    st.success(f"📋 저장된 조언 ({saved_advice[name]['created_at'][:10]})")
-                    st.markdown(saved_advice[name]["advice"])
-                    
-                    # 예술치료사는 이미지도 표시
-                    if is_art:
-                        image_b64, prompt = load_metaphor_image(selected_date)
-                        if image_b64:
-                            try:
-                                image_data = base64.b64decode(image_b64)
-                                st.image(image_data, caption="감정 메타포 이미지", use_container_width=True)
-                            except:
-                                pass
-                    
+                if name in saved:
+                    st.success(f"📋 {saved[name]['created_at'][:10]}")
+                    st.markdown(saved[name]["advice"])
                     st.divider()
                 
-                if st.button(f"💬 {name} 조언", key=f"btn_{name}", use_container_width=True):
-                    if show_chart and len(items) >= 2:
+                if st.button(f"💬 {name} 조언", key=f"b_{name}", use_container_width=True):
+                    if chart and len(items) >= 2:
                         if name in ["심리상담사", "임상심리사"]:
-                            chart1 = create_emotion_flow_chart(items)
-                            if chart1:
-                                st.image(chart1, caption="Emotion Flow", use_container_width=True)
-                            chart2 = create_emotion_network(items)
-                            if chart2:
-                                st.image(chart2, caption="Network", use_container_width=True)
+                            flow = create_emotion_flow_chart(items)
+                            if flow:
+                                st.image(flow, caption="Emotion Flow", use_container_width=True)
+                            net = create_emotion_network(items)
+                            if net:
+                                st.image(net, caption="Network", use_container_width=True)
                         elif name == "창업 벤처투자자":
-                            chart = create_goal_flowchart(items)
-                            if chart:
-                                st.image(chart, caption="Goal Flow", use_container_width=True)
+                            goal = create_goal_flowchart(items)
+                            if goal:
+                                st.image(goal, caption="Goal", use_container_width=True)
                     
-                    if is_art:
-                        # 예술치료사: 메타포 생성 및 이미지 생성
+                    if name == "예술치료사":
                         metaphor_text, emotion = create_metaphor_prompt(items)
-                        st.info(f"🎨 **감정 메타포:** {metaphor_text}")
+                        st.info(f"🎨 **메타포:** {metaphor_text}")
                         
-                        # Gemini로 이미지 생성
-                        with st.spinner("🎨 AI가 메타포 이미지를 생성 중..."):
-                            image_b64, image_prompt = generate_metaphor_image(metaphor_text)
+                        # 이미지 생성 시도
+                        with st.spinner("🖼️ AI 이미지 생성 중..."):
+                            # 저장된 이미지 확인
+                            saved_img, saved_prompt = load_metaphor_image(sel_date)
                             
-                            if image_b64:
-                                try:
-                                    image_data = base64.b64decode(image_b64)
-                                    st.image(image_data, caption="AI 생성 메타포 이미지", use_container_width=True)
+                            if saved_img:
+                                st.success("💾 저장된 이미지 표시")
+                                img_data = base64.b64decode(saved_img)
+                                st.image(img_data, caption="Metaphor Image", use_container_width=True)
+                            else:
+                                # 새로 생성
+                                img_base64, img_prompt = generate_metaphor_image(metaphor_text)
+                                
+                                if img_base64:
+                                    img_data = base64.b64decode(img_base64)
+                                    st.image(img_data, caption="AI Generated", use_container_width=True)
                                     
                                     # Google Sheets에 저장
-                                    save_metaphor_image(selected_date, image_b64, image_prompt)
-                                    st.success("💾 이미지 저장됨")
-                                except Exception as e:
-                                    st.warning(f"이미지 표시 실패: {e}")
-                            else:
-                                st.warning("⚠️ 이미지 생성 실패. Gemini Imagen 모델이 필요합니다.")
+                                    if save_metaphor_image(sel_date, img_base64, img_prompt):
+                                        st.success("💾 이미지 저장 완료!")
+                                else:
+                                    st.warning("⚠️ 이미지 생성 실패 (Imagen API 미지원)")
+                                    st.info("💡 대신 메타포 텍스트로 감상하세요")
                     
                     result = get_expert_advice(name, data)
                     if result.get("has_content"):
-                        st.success(f"**{name}의 조언:**")
+                        st.success(f"**{name} 조언:**")
                         st.markdown(result["advice"])
-                        save_expert_advice_to_sheets(selected_date, name, result["advice"], result["has_content"])
-                        st.success("💾 저장됨")
+                        save_expert_advice_to_sheets(sel_date, name, result["advice"], result["has_content"])
+                        st.success("💾 저장!")
                     else:
                         st.info(result["advice"])
         
         st.divider()
-        st.warning("⚠️ AI 조언은 참고용입니다. 전문가 상담 권장.")
+        st.warning("⚠️ AI 조언은 참고용. 전문가 상담 필요 시 반드시 전문의와 상담하세요.")
 
 with tab5:
     st.subheader("📊 기간별 비교")
     data, items = get_latest_data()
     
     if len(items) < 14:
-        st.info("📝 비교 분석: 최소 14개 일기 필요")
+        st.info("📝 14개 일기 필요")
     else:
-        comparison = compare_periods(items)
+        comp = compare_periods(items)
         
-        if comparison:
-            st.write("**📈 최근 1주 vs 이전 1주**")
+        if comp:
+            st.write("**📈 최근 vs 이전 (1주)**")
             
-            emotion_names = {
-                'joy': '😄 기쁨',
-                'sadness': '😢 슬픔',
-                'anger': '😡 분노',
-                'anxiety': '😰 불안',
-                'calmness': '😌 평온'
+            emotion_map = {
+                'joy': ('😄', '기쁨'),
+                'sadness': ('😢', '슬픔'),
+                'anger': ('😡', '분노'),
+                'anxiety': ('😰', '불안'),
+                'calmness': ('😌', '평온')
             }
             
-            # 모바일 최적화: 세로 배치
-            for emotion, name in emotion_names.items():
-                data_cmp = comparison[emotion]
-                trend = "📈" if data_cmp['trend'] == '상승' else ("📉" if data_cmp['trend'] == '하락' else "➡️")
-                
-                # 카드 스타일로 표시
-                st.markdown(f"**{name}** {trend} {data_cmp['trend']}")
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("최근", f"{data_cmp['recent']:.1f}")
-                with col2:
-                    st.metric("이전", f"{data_cmp['previous']:.1f}")
-                with col3:
-                    st.metric("변화", f"{data_cmp['diff']:+.1f}")
-                
-                st.divider()
+            # 모바일 최적화: 한 줄에 하나씩
+            for key, (emoji, name) in emotion_map.items():
+                if key in comp:
+                    d = comp[key]
+                    trend = "📈" if d['trend'] == '상승' else ("📉" if d['trend'] == '하락' else "➡️")
+                    
+                    # 컴팩트한 표시
+                    col1, col2, col3 = st.columns([2, 2, 1])
+                    with col1:
+                        st.metric(f"{emoji} {name}", f"{d['recent']:.1f}", f"{d['diff']:+.1f}")
+                    with col2:
+                        st.caption(f"이전: {d['previous']:.1f}")
+                    with col3:
+                        st.caption(f"{trend} {d['trend']}")
             
-            # 종합 분석
-            total_trend = comparison['total']['trend']
-            total_diff = comparison['total']['diff']
+            st.divider()
             
-            if total_trend == '상승':
-                st.success(f"🎉 종합 감정 점수 상승! ({total_diff:+.1f}점)")
-            elif total_trend == '하락':
-                st.warning(f"😔 종합 감정 점수 하락. ({total_diff:+.1f}점)")
+            # 종합 점수
+            total = comp['total']
+            if total['trend'] == '상승':
+                st.success(f"🎉 종합 상승! (+{total['diff']:.1f}점)")
+            elif total['trend'] == '하락':
+                st.warning(f"😔 종합 하락 ({total['diff']:+.1f}점)")
             else:
-                st.info(f"➡️ 종합 감정 점수 유지.")
+                st.info(f"➡️ 종합 유지")
 
 st.divider()
-st.markdown("### 💝 매일 감정을 기록하며 마음을 돌보세요!")
-st.caption("🤖 AI | ☁️ 클라우드 | 🎤 클로버 95% | 🎨 이미지 생성")
+st.markdown("### 💝 매일 감정 기록")
+st.caption("🤖 AI | ☁️ 클라우드 | 🎤 클로버 95%")
