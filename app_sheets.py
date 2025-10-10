@@ -160,7 +160,8 @@ def generate_image_with_huggingface(prompt, negative_prompt=""):
         return None, "Hugging Face API 키가 설정되지 않았습니다."
     
     headers = {
-        "Authorization": f"Bearer {HUGGINGFACE_API_KEY}"
+        "Authorization": f"Bearer {HUGGINGFACE_API_KEY}",
+        "Content-Type": "application/json"
     }
     
     payload = {
@@ -177,26 +178,66 @@ def generate_image_with_huggingface(prompt, negative_prompt=""):
             HUGGINGFACE_API_URL,
             headers=headers,
             json=payload,
-            timeout=60
+            timeout=90
         )
         
+        # 응답 상태 확인
         if response.status_code == 200:
-            image = Image.open(BytesIO(response.content))
-            # PIL Image를 base64로 변환
-            buffered = BytesIO()
-            image.save(buffered, format="PNG")
-            img_base64 = base64.b64encode(buffered.getvalue()).decode()
-            return img_base64, None
+            # Content-Type 확인
+            content_type = response.headers.get('content-type', '')
+            
+            # 이미지 데이터인 경우
+            if 'image' in content_type or len(response.content) > 1000:
+                try:
+                    image = Image.open(BytesIO(response.content))
+                    # PIL Image를 base64로 변환
+                    buffered = BytesIO()
+                    image.save(buffered, format="PNG")
+                    img_base64 = base64.b64encode(buffered.getvalue()).decode()
+                    return img_base64, None
+                except Exception as img_error:
+                    return None, f"❌ 이미지 변환 실패: {str(img_error)}"
+            else:
+                # JSON 응답인 경우 (에러 메시지 등)
+                try:
+                    error_data = response.json()
+                    error_msg = error_data.get('error', '알 수 없는 오류')
+                    return None, f"❌ API 응답 오류: {error_msg}"
+                except:
+                    return None, f"❌ 예상치 못한 응답 형식"
+        
         elif response.status_code == 503:
-            return None, "⏳ 모델 로딩 중입니다. 20초 후 다시 시도해주세요."
+            # 모델 로딩 중
+            try:
+                error_data = response.json()
+                estimated_time = error_data.get('estimated_time', 20)
+                return None, f"⏳ 모델 로딩 중입니다. 약 {estimated_time}초 후 다시 시도해주세요."
+            except:
+                return None, "⏳ 모델 로딩 중입니다. 20초 후 다시 시도해주세요."
+        
+        elif response.status_code == 401:
+            return None, "❌ API 키가 유효하지 않습니다. Secrets 설정을 확인해주세요."
+        
+        elif response.status_code == 429:
+            return None, "⚠️ API 사용 한도를 초과했습니다. 잠시 후 다시 시도해주세요."
+        
         else:
-            error_msg = response.json().get('error', '알 수 없는 오류')
-            return None, f"❌ 이미지 생성 실패: {error_msg}"
+            # 기타 에러
+            try:
+                error_data = response.json()
+                error_msg = error_data.get('error', f'HTTP {response.status_code}')
+                return None, f"❌ API 오류: {error_msg}"
+            except:
+                return None, f"❌ HTTP {response.status_code} 오류"
             
     except requests.exceptions.Timeout:
-        return None, "⏱️ 요청 시간이 초과되었습니다."
+        return None, "⏱️ 요청 시간이 초과되었습니다. 네트워크를 확인하거나 다시 시도해주세요."
+    
+    except requests.exceptions.ConnectionError:
+        return None, "❌ 네트워크 연결 오류. 인터넷 연결을 확인해주세요."
+    
     except Exception as e:
-        return None, f"❌ 오류: {str(e)}"
+        return None, f"❌ 예상치 못한 오류: {str(e)}"
 
 def create_emotion_prompt_for_huggingface(emotion_summary, keywords):
     """
@@ -877,12 +918,23 @@ with tab4:
                             try:
                                 img_data = base64.b64decode(saved_img)
                                 st.image(img_data, caption="Metaphor Image", use_container_width=True)
-                            except:
-                                st.warning("이미지 로드 실패")
-                        else:
-                            # Hugging Face로 새 이미지 생성
+                                
+                                # 재생성 버튼
+                                if st.button("🔄 새 이미지 생성", key="regenerate_img", use_container_width=True):
+                                    st.session_state.force_regenerate = True
+                                    st.rerun()
+                            except Exception as decode_error:
+                                st.warning(f"⚠️ 저장된 이미지 로드 실패: {str(decode_error)}")
+                                st.info("새 이미지를 생성합니다...")
+                                saved_img = None  # 새로 생성하도록
+                        
+                        # 새 이미지 생성 (저장된 이미지가 없거나 재생성 요청 시)
+                        if not saved_img or st.session_state.get('force_regenerate', False):
+                            if st.session_state.get('force_regenerate', False):
+                                st.session_state.force_regenerate = False
+                            
                             if HUGGINGFACE_ENABLED:
-                                with st.spinner("🎨 Hugging Face AI로 이미지 생성 중..."):
+                                with st.spinner("🎨 Hugging Face AI로 이미지 생성 중... (최대 90초 소요)"):
                                     # 최근 일기에서 키워드 추출
                                     recent_keywords = []
                                     for item in items[-7:]:
@@ -894,32 +946,63 @@ with tab4:
                                         recent_keywords
                                     )
                                     
-                                    st.info(f"🎨 생성 프롬프트: {prompt[:100]}...")
+                                    # 프롬프트 미리보기
+                                    with st.expander("🔍 생성 프롬프트 보기"):
+                                        st.code(f"Prompt: {prompt}\n\nNegative: {negative_prompt}")
                                     
                                     # 이미지 생성
                                     img_base64, error = generate_image_with_huggingface(prompt, negative_prompt)
                                     
                                     if img_base64:
-                                        img_data = base64.b64decode(img_base64)
-                                        st.image(img_data, caption="AI Generated Art", use_container_width=True)
-                                        
-                                        # Google Sheets에 저장
-                                        if save_metaphor_image(sel_date, img_base64, prompt):
-                                            st.success("💾 이미지 저장 완료!")
-                                        
-                                        # 다운로드 버튼
-                                        st.download_button(
-                                            label="📥 이미지 다운로드",
-                                            data=img_data,
-                                            file_name=f"emotion_art_{sel_date}.png",
-                                            mime="image/png",
-                                            use_container_width=True
-                                        )
+                                        try:
+                                            img_data = base64.b64decode(img_base64)
+                                            st.success("✅ 이미지 생성 완료!")
+                                            st.image(img_data, caption="AI Generated Art", use_container_width=True)
+                                            
+                                            # Google Sheets에 저장
+                                            with st.spinner("💾 이미지 저장 중..."):
+                                                if save_metaphor_image(sel_date, img_base64, prompt):
+                                                    st.success("💾 클라우드 저장 완료!")
+                                                else:
+                                                    st.warning("⚠️ 클라우드 저장 실패 (이미지는 사용 가능)")
+                                            
+                                            # 다운로드 버튼
+                                            st.download_button(
+                                                label="📥 이미지 다운로드",
+                                                data=img_data,
+                                                file_name=f"emotion_art_{sel_date}.png",
+                                                mime="image/png",
+                                                use_container_width=True,
+                                                type="secondary"
+                                            )
+                                        except Exception as img_error:
+                                            st.error(f"❌ 이미지 처리 오류: {str(img_error)}")
                                     else:
-                                        st.error(error)
+                                        st.error(error if error else "이미지 생성 실패")
+                                        
+                                        # 디버깅 정보
+                                        with st.expander("🔧 문제 해결 가이드"):
+                                            st.markdown("""
+                                            **가능한 원인:**
+                                            1. **모델 로딩 중**: 20-30초 후 다시 시도
+                                            2. **API 키 오류**: Secrets에서 HUGGINGFACE_API_KEY 확인
+                                            3. **사용 한도 초과**: 잠시 후 재시도
+                                            4. **네트워크 오류**: 인터넷 연결 확인
+                                            
+                                            **API 키 확인:**
+                                            - Hugging Face 토큰은 `hf_`로 시작해야 합니다
+                                            - Settings → Access Tokens에서 생성
+                                            """)
                             else:
                                 st.warning("⚠️ Hugging Face API 키가 설정되지 않았습니다.")
-                                st.info("💡 Streamlit Cloud Secrets에서 HUGGINGFACE_API_KEY를 설정해주세요.")
+                                st.info("""
+                                **설정 방법:**
+                                1. Hugging Face (https://huggingface.co/) 가입
+                                2. Settings → Access Tokens → New Token
+                                3. Streamlit Cloud → Settings → Secrets
+                                4. `HUGGINGFACE_API_KEY = "hf_your_token"`
+                                """)
+                                st.code('HUGGINGFACE_API_KEY = "hf_..."', language="toml")
                     
                     result = get_expert_advice(name, data)
                     if result.get("has_content"):
@@ -987,4 +1070,3 @@ if CLOVA_ENABLED:
 if HUGGINGFACE_ENABLED:
     footer_items.append("🎨 HF Image")
 st.caption(" | ".join(footer_items))
-
