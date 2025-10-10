@@ -59,10 +59,17 @@ st.markdown(pwa_html, unsafe_allow_html=True)
 
 _ = load_dotenv(find_dotenv())
 
-# API 키 설정
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or st.secrets.get("GEMINI_API_KEY", "")
-NAVER_CLIENT_ID = os.environ.get("NAVER_CLIENT_ID") or st.secrets.get("NAVER_CLIENT_ID", "")
-NAVER_CLIENT_SECRET = os.environ.get("NAVER_CLIENT_SECRET") or st.secrets.get("NAVER_CLIENT_SECRET", "")
+# API 키 설정 (Streamlit Cloud 우선, 로컬 환경변수 대체)
+try:
+    GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+    NAVER_CLIENT_ID = st.secrets.get("NAVER_CLIENT_ID", "")
+    NAVER_CLIENT_SECRET = st.secrets.get("NAVER_CLIENT_SECRET", "")
+    HUGGINGFACE_API_KEY = st.secrets.get("HUGGINGFACE_API_KEY", "")
+except:
+    GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+    NAVER_CLIENT_ID = os.environ.get("NAVER_CLIENT_ID", "")
+    NAVER_CLIENT_SECRET = os.environ.get("NAVER_CLIENT_SECRET", "")
+    HUGGINGFACE_API_KEY = os.environ.get("HUGGINGFACE_API_KEY", "")
 
 # Gemini 설정
 if GEMINI_API_KEY:
@@ -75,23 +82,19 @@ if GEMINI_API_KEY:
         if available_models:
             model_name = available_models[0].replace('models/', '')
             model = genai.GenerativeModel(model_name)
-            # 이미지 생성용 모델 체크
-            imagen_models = [m for m in genai.list_models() if 'generateImages' in m.supported_generation_methods]
-            if imagen_models:
-                IMAGEN_AVAILABLE = True
-            else:
-                IMAGEN_AVAILABLE = False
         else:
             model = genai.GenerativeModel('gemini-pro')
-            IMAGEN_AVAILABLE = False
     except:
         model = genai.GenerativeModel('gemini-pro')
-        IMAGEN_AVAILABLE = False
 else:
     st.error("🔑 GEMINI_API_KEY가 설정되지 않았습니다.")
     st.stop()
 
 CLOVA_ENABLED = bool(NAVER_CLIENT_ID and NAVER_CLIENT_SECRET)
+HUGGINGFACE_ENABLED = bool(HUGGINGFACE_API_KEY)
+
+# Hugging Face 설정
+HUGGINGFACE_API_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-2-1"
 
 # Google Sheets 연결
 @st.cache_resource
@@ -148,35 +151,93 @@ def clova_speech_to_text(audio_file):
     except Exception as e:
         return f"❌ 오류: {str(e)}"
 
-# Gemini 이미지 생성
-def generate_metaphor_image(prompt_text):
-    """Gemini로 메타포 이미지 생성"""
+# Hugging Face 이미지 생성 (새로운 기능!)
+def generate_image_with_huggingface(prompt, negative_prompt=""):
+    """
+    Hugging Face Stable Diffusion으로 이미지 생성
+    """
+    if not HUGGINGFACE_ENABLED:
+        return None, "Hugging Face API 키가 설정되지 않았습니다."
+    
+    headers = {
+        "Authorization": f"Bearer {HUGGINGFACE_API_KEY}"
+    }
+    
+    payload = {
+        "inputs": prompt,
+        "parameters": {
+            "negative_prompt": negative_prompt,
+            "num_inference_steps": 30,
+            "guidance_scale": 7.5,
+        }
+    }
+    
     try:
-        # Imagen 3 사용 (Gemini의 이미지 생성 모델)
-        image_prompt = f"""
-        Create a artistic, emotional metaphor image representing: {prompt_text}
-        Style: Abstract, dreamy, emotional, artistic
-        Mood: Reflective and contemplative
-        Colors: Soft, pastel tones
-        """
-        
-        # 이미지 생성 (Gemini API)
-        result = genai.generate_images(
-            model='imagen-3.0-generate-001',
-            prompt=image_prompt,
-            number_of_images=1
+        response = requests.post(
+            HUGGINGFACE_API_URL,
+            headers=headers,
+            json=payload,
+            timeout=60
         )
         
-        if result.images:
-            # 이미지를 base64로 인코딩
-            image_data = result.images[0]._image_bytes
-            image_base64 = base64.b64encode(image_data).decode()
-            return image_base64, image_prompt
+        if response.status_code == 200:
+            image = Image.open(BytesIO(response.content))
+            # PIL Image를 base64로 변환
+            buffered = BytesIO()
+            image.save(buffered, format="PNG")
+            img_base64 = base64.b64encode(buffered.getvalue()).decode()
+            return img_base64, None
+        elif response.status_code == 503:
+            return None, "⏳ 모델 로딩 중입니다. 20초 후 다시 시도해주세요."
         else:
-            return None, None
+            error_msg = response.json().get('error', '알 수 없는 오류')
+            return None, f"❌ 이미지 생성 실패: {error_msg}"
+            
+    except requests.exceptions.Timeout:
+        return None, "⏱️ 요청 시간이 초과되었습니다."
     except Exception as e:
-        st.warning(f"이미지 생성 실패: {e}")
-        return None, None
+        return None, f"❌ 오류: {str(e)}"
+
+def create_emotion_prompt_for_huggingface(emotion_summary, keywords):
+    """
+    감정과 키워드를 기반으로 Hugging Face용 프롬프트 생성
+    """
+    # 감정별 스타일 매핑
+    emotion_styles = {
+        'joy': 'bright, cheerful, warm colors, joyful, sunny, vibrant, happy atmosphere',
+        'sadness': 'melancholic, blue tones, gentle rain, soft mood, emotional, peaceful',
+        'anger': 'intense, red and orange colors, stormy, powerful, dramatic',
+        'anxiety': 'turbulent, purple and grey tones, swirling patterns, uncertain',
+        'calmness': 'calm, serene, pastel colors, tranquil, peaceful, gentle'
+    }
+    
+    # 가장 높은 감정 찾기
+    dominant_emotion = max(emotion_summary, key=emotion_summary.get)
+    style = emotion_styles.get(dominant_emotion, 'balanced, neutral, artistic')
+    
+    # 키워드를 영어로 간단히 변환 (주요 키워드만)
+    keyword_map = {
+        '햇빛': 'sunshine', '비': 'rain', '바다': 'ocean', '산': 'mountain',
+        '도시': 'city', '숲': 'forest', '밤': 'night', '낮': 'day',
+        '친구': 'friends', '가족': 'family', '집': 'home', '공원': 'park',
+        '하늘': 'sky', '구름': 'clouds', '꽃': 'flowers', '나무': 'trees',
+        '사랑': 'love', '행복': 'happiness', '희망': 'hope'
+    }
+    
+    english_keywords = []
+    for k in keywords[:3]:  # 상위 3개만
+        if k in keyword_map:
+            english_keywords.append(keyword_map[k])
+    
+    keywords_str = ', '.join(english_keywords) if english_keywords else 'abstract scene'
+    
+    # 프롬프트 생성
+    prompt = f"A beautiful artistic illustration, {style}, featuring {keywords_str}, digital art, high quality, detailed, expressive, emotional artwork, masterpiece"
+    
+    # Negative prompt
+    negative_prompt = "text, words, letters, watermark, signature, blurry, low quality, ugly, distorted, deformed, nsfw, realistic photo"
+    
+    return prompt, negative_prompt
 
 def save_metaphor_image(date_str, image_base64, prompt):
     """메타포 이미지를 Google Sheets에 저장"""
@@ -498,7 +559,7 @@ def create_metaphor_prompt(items):
         'calmness': 'Calm sea, peaceful forest, sky above clouds'
     }
     
-    return f"{metaphors[dominant_emotion]}", dominant_emotion
+    return f"{metaphors[dominant_emotion]}", dominant_emotion, emotions_summary
 
 def gemini_chat(prompt):
     try:
@@ -563,7 +624,13 @@ def calc_total_score(item):
 
 # 메인 화면
 st.title("📱 감정 일기")
-st.caption("AI 분석 | ☁️ 클라우드 | 🎤 네이버 클로버 (95%)")
+api_status = []
+if CLOVA_ENABLED:
+    api_status.append("🎤 클로버 95%")
+if HUGGINGFACE_ENABLED:
+    api_status.append("🎨 Hugging Face")
+status_text = " | ".join(["AI 분석", "☁️ 클라우드"] + api_status)
+st.caption(status_text)
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["✍️ 쓰기", "📊 통계", "📈 그래프", "👨‍⚕️ 전문가", "📊 비교"])
 
@@ -799,32 +866,60 @@ with tab4:
                                 st.image(goal, caption="Goal", use_container_width=True)
                     
                     if name == "예술치료사":
-                        metaphor_text, emotion = create_metaphor_prompt(items)
+                        metaphor_text, emotion, emotions_summary = create_metaphor_prompt(items)
                         st.info(f"🎨 **메타포:** {metaphor_text}")
                         
-                        # 이미지 생성 시도
-                        with st.spinner("🖼️ AI 이미지 생성 중..."):
-                            # 저장된 이미지 확인
-                            saved_img, saved_prompt = load_metaphor_image(sel_date)
-                            
-                            if saved_img:
-                                st.success("💾 저장된 이미지 표시")
+                        # 저장된 이미지 확인
+                        saved_img, saved_prompt = load_metaphor_image(sel_date)
+                        
+                        if saved_img:
+                            st.success("💾 저장된 이미지 표시")
+                            try:
                                 img_data = base64.b64decode(saved_img)
                                 st.image(img_data, caption="Metaphor Image", use_container_width=True)
-                            else:
-                                # 새로 생성
-                                img_base64, img_prompt = generate_metaphor_image(metaphor_text)
-                                
-                                if img_base64:
-                                    img_data = base64.b64decode(img_base64)
-                                    st.image(img_data, caption="AI Generated", use_container_width=True)
+                            except:
+                                st.warning("이미지 로드 실패")
+                        else:
+                            # Hugging Face로 새 이미지 생성
+                            if HUGGINGFACE_ENABLED:
+                                with st.spinner("🎨 Hugging Face AI로 이미지 생성 중..."):
+                                    # 최근 일기에서 키워드 추출
+                                    recent_keywords = []
+                                    for item in items[-7:]:
+                                        recent_keywords.extend(item['keywords'])
                                     
-                                    # Google Sheets에 저장
-                                    if save_metaphor_image(sel_date, img_base64, img_prompt):
-                                        st.success("💾 이미지 저장 완료!")
-                                else:
-                                    st.warning("⚠️ 이미지 생성 실패 (Imagen API 미지원)")
-                                    st.info("💡 대신 메타포 텍스트로 감상하세요")
+                                    # 프롬프트 생성
+                                    prompt, negative_prompt = create_emotion_prompt_for_huggingface(
+                                        emotions_summary, 
+                                        recent_keywords
+                                    )
+                                    
+                                    st.info(f"🎨 생성 프롬프트: {prompt[:100]}...")
+                                    
+                                    # 이미지 생성
+                                    img_base64, error = generate_image_with_huggingface(prompt, negative_prompt)
+                                    
+                                    if img_base64:
+                                        img_data = base64.b64decode(img_base64)
+                                        st.image(img_data, caption="AI Generated Art", use_container_width=True)
+                                        
+                                        # Google Sheets에 저장
+                                        if save_metaphor_image(sel_date, img_base64, prompt):
+                                            st.success("💾 이미지 저장 완료!")
+                                        
+                                        # 다운로드 버튼
+                                        st.download_button(
+                                            label="📥 이미지 다운로드",
+                                            data=img_data,
+                                            file_name=f"emotion_art_{sel_date}.png",
+                                            mime="image/png",
+                                            use_container_width=True
+                                        )
+                                    else:
+                                        st.error(error)
+                            else:
+                                st.warning("⚠️ Hugging Face API 키가 설정되지 않았습니다.")
+                                st.info("💡 Streamlit Cloud Secrets에서 HUGGINGFACE_API_KEY를 설정해주세요.")
                     
                     result = get_expert_advice(name, data)
                     if result.get("has_content"):
@@ -886,4 +981,10 @@ with tab5:
 
 st.divider()
 st.markdown("### 💝 매일 감정 기록")
-st.caption("🤖 AI | ☁️ 클라우드 | 🎤 클로버 95%")
+footer_items = ["🤖 AI", "☁️ 클라우드"]
+if CLOVA_ENABLED:
+    footer_items.append("🎤 클로버 95%")
+if HUGGINGFACE_ENABLED:
+    footer_items.append("🎨 HF Image")
+st.caption(" | ".join(footer_items))
+
