@@ -93,8 +93,12 @@ else:
 CLOVA_ENABLED = bool(NAVER_CLIENT_ID and NAVER_CLIENT_SECRET)
 HUGGINGFACE_ENABLED = bool(HUGGINGFACE_API_KEY)
 
-# Hugging Face 설정
-HUGGINGFACE_API_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-2-1"
+# Hugging Face 설정 - 여러 모델 대안 제공
+HUGGINGFACE_MODELS = [
+    "runwayml/stable-diffusion-v1-5",  # 가장 안정적
+    "CompVis/stable-diffusion-v1-4",   # 대체 모델 1
+    "stabilityai/stable-diffusion-2-1-base",  # 대체 모델 2
+]
 
 # Google Sheets 연결
 @st.cache_resource
@@ -154,90 +158,123 @@ def clova_speech_to_text(audio_file):
 # Hugging Face 이미지 생성 (새로운 기능!)
 def generate_image_with_huggingface(prompt, negative_prompt=""):
     """
-    Hugging Face Stable Diffusion으로 이미지 생성
+    Hugging Face Stable Diffusion으로 이미지 생성 (자동 폴백)
     """
     if not HUGGINGFACE_ENABLED:
         return None, "Hugging Face API 키가 설정되지 않았습니다."
     
-    headers = {
-        "Authorization": f"Bearer {HUGGINGFACE_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    
-    payload = {
-        "inputs": prompt,
-        "parameters": {
-            "negative_prompt": negative_prompt,
-            "num_inference_steps": 30,
-            "guidance_scale": 7.5,
-        }
-    }
-    
-    try:
-        response = requests.post(
-            HUGGINGFACE_API_URL,
-            headers=headers,
-            json=payload,
-            timeout=90
-        )
+    # 여러 모델 시도
+    for model_idx, model_name in enumerate(HUGGINGFACE_MODELS):
+        api_url = f"https://api-inference.huggingface.co/models/{model_name}"
         
-        # 응답 상태 확인
-        if response.status_code == 200:
-            # Content-Type 확인
-            content_type = response.headers.get('content-type', '')
+        headers = {
+            "Authorization": f"Bearer {HUGGINGFACE_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "inputs": prompt,
+            "parameters": {
+                "negative_prompt": negative_prompt,
+                "num_inference_steps": 25,  # 속도 개선
+                "guidance_scale": 7.5,
+            }
+        }
+        
+        try:
+            response = requests.post(
+                api_url,
+                headers=headers,
+                json=payload,
+                timeout=90
+            )
             
-            # 이미지 데이터인 경우
-            if 'image' in content_type or len(response.content) > 1000:
-                try:
-                    image = Image.open(BytesIO(response.content))
-                    # PIL Image를 base64로 변환
-                    buffered = BytesIO()
-                    image.save(buffered, format="PNG")
-                    img_base64 = base64.b64encode(buffered.getvalue()).decode()
-                    return img_base64, None
-                except Exception as img_error:
-                    return None, f"❌ 이미지 변환 실패: {str(img_error)}"
-            else:
-                # JSON 응답인 경우 (에러 메시지 등)
+            # 응답 상태 확인
+            if response.status_code == 200:
+                # Content-Type 확인
+                content_type = response.headers.get('content-type', '')
+                
+                # 이미지 데이터인 경우
+                if 'image' in content_type or len(response.content) > 1000:
+                    try:
+                        image = Image.open(BytesIO(response.content))
+                        # PIL Image를 base64로 변환
+                        buffered = BytesIO()
+                        image.save(buffered, format="PNG")
+                        img_base64 = base64.b64encode(buffered.getvalue()).decode()
+                        
+                        # 성공 시 사용된 모델 정보 반환
+                        if model_idx > 0:
+                            st.info(f"✅ 대체 모델 사용: {model_name}")
+                        
+                        return img_base64, None
+                    except Exception as img_error:
+                        continue  # 다음 모델 시도
+                else:
+                    # JSON 응답인 경우 (에러 메시지 등)
+                    try:
+                        error_data = response.json()
+                        error_msg = error_data.get('error', '알 수 없는 오류')
+                        # 다음 모델 시도
+                        continue
+                    except:
+                        continue
+            
+            elif response.status_code == 503:
+                # 모델 로딩 중 - 대기 시간 확인
                 try:
                     error_data = response.json()
-                    error_msg = error_data.get('error', '알 수 없는 오류')
-                    return None, f"❌ API 응답 오류: {error_msg}"
+                    estimated_time = error_data.get('estimated_time', 20)
+                    if model_idx == len(HUGGINGFACE_MODELS) - 1:  # 마지막 모델
+                        return None, f"⏳ 모델 로딩 중입니다. 약 {estimated_time}초 후 다시 시도해주세요."
+                    else:
+                        continue  # 다음 모델 시도
                 except:
-                    return None, f"❌ 예상치 못한 응답 형식"
-        
-        elif response.status_code == 503:
-            # 모델 로딩 중
-            try:
-                error_data = response.json()
-                estimated_time = error_data.get('estimated_time', 20)
-                return None, f"⏳ 모델 로딩 중입니다. 약 {estimated_time}초 후 다시 시도해주세요."
-            except:
-                return None, "⏳ 모델 로딩 중입니다. 20초 후 다시 시도해주세요."
-        
-        elif response.status_code == 401:
-            return None, "❌ API 키가 유효하지 않습니다. Secrets 설정을 확인해주세요."
-        
-        elif response.status_code == 429:
-            return None, "⚠️ API 사용 한도를 초과했습니다. 잠시 후 다시 시도해주세요."
-        
-        else:
-            # 기타 에러
-            try:
-                error_data = response.json()
-                error_msg = error_data.get('error', f'HTTP {response.status_code}')
-                return None, f"❌ API 오류: {error_msg}"
-            except:
-                return None, f"❌ HTTP {response.status_code} 오류"
+                    continue
             
-    except requests.exceptions.Timeout:
-        return None, "⏱️ 요청 시간이 초과되었습니다. 네트워크를 확인하거나 다시 시도해주세요."
+            elif response.status_code == 404:
+                # 모델을 찾을 수 없음 - 다음 모델 시도
+                continue
+            
+            elif response.status_code == 401:
+                # API 키 오류 - 모든 모델에 동일하게 적용되므로 즉시 반환
+                return None, "❌ API 키가 유효하지 않습니다. Secrets에서 HUGGINGFACE_API_KEY를 확인해주세요."
+            
+            elif response.status_code == 429:
+                # 사용 한도 초과
+                return None, "⚠️ API 사용 한도를 초과했습니다. 잠시 후 다시 시도해주세요."
+            
+            else:
+                # 기타 에러 - 다음 모델 시도
+                continue
+                
+        except requests.exceptions.Timeout:
+            # 타임아웃 - 다음 모델 시도
+            continue
+        
+        except requests.exceptions.ConnectionError:
+            return None, "❌ 네트워크 연결 오류. 인터넷 연결을 확인해주세요."
+        
+        except Exception as e:
+            # 마지막 모델에서 실패하면 에러 반환
+            if model_idx == len(HUGGINGFACE_MODELS) - 1:
+                return None, f"❌ 예상치 못한 오류: {str(e)}"
+            continue
     
-    except requests.exceptions.ConnectionError:
-        return None, "❌ 네트워크 연결 오류. 인터넷 연결을 확인해주세요."
+    # 모든 모델 실패
+    return None, """
+    ❌ 모든 모델에서 이미지 생성에 실패했습니다.
     
-    except Exception as e:
-        return None, f"❌ 예상치 못한 오류: {str(e)}"
+    **가능한 원인:**
+    1. Hugging Face API 무료 티어에서 해당 모델들이 제한되었을 수 있습니다
+    2. API 키가 올바르지 않을 수 있습니다
+    3. 일시적인 서버 문제일 수 있습니다
+    
+    **해결 방법:**
+    - API 키 확인: `hf_`로 시작하는지 확인
+    - 잠시 후 다시 시도
+    - Hugging Face 웹사이트에서 계정 상태 확인
+    """
 
 def create_emotion_prompt_for_huggingface(emotion_summary, keywords):
     """
@@ -934,7 +971,7 @@ with tab4:
                                 st.session_state.force_regenerate = False
                             
                             if HUGGINGFACE_ENABLED:
-                                with st.spinner("🎨 Hugging Face AI로 이미지 생성 중... (최대 90초 소요)"):
+                                with st.spinner("🎨 AI 이미지 생성 중... (여러 모델 시도 중, 최대 90초)"):
                                     # 최근 일기에서 키워드 추출
                                     recent_keywords = []
                                     for item in items[-7:]:
@@ -949,6 +986,7 @@ with tab4:
                                     # 프롬프트 미리보기
                                     with st.expander("🔍 생성 프롬프트 보기"):
                                         st.code(f"Prompt: {prompt}\n\nNegative: {negative_prompt}")
+                                        st.caption(f"시도할 모델: {', '.join(HUGGINGFACE_MODELS)}")
                                     
                                     # 이미지 생성
                                     img_base64, error = generate_image_with_huggingface(prompt, negative_prompt)
