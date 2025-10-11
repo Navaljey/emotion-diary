@@ -95,10 +95,14 @@ HUGGINGFACE_ENABLED = bool(HUGGINGFACE_API_KEY)
 
 # Hugging Face 설정 - 여러 모델 대안 제공
 HUGGINGFACE_MODELS = [
-    "runwayml/stable-diffusion-v1-5",  # 가장 안정적
-    "CompVis/stable-diffusion-v1-4",   # 대체 모델 1
-    "stabilityai/stable-diffusion-2-1-base",  # 대체 모델 2
+    "black-forest-labs/FLUX.1-schnell",  # 가장 최신, 빠름
+    "runwayml/stable-diffusion-v1-5",  
+    "stabilityai/stable-diffusion-xl-base-1.0",
+    "prompthero/openjourney",  # 무료 티어에서 작동 가능
 ]
+
+# 대체 API (Pollinations.ai - 완전 무료, API 키 불필요)
+POLLINATIONS_API_URL = "https://image.pollinations.ai/prompt/"
 
 # Google Sheets 연결
 @st.cache_resource
@@ -155,17 +159,53 @@ def clova_speech_to_text(audio_file):
     except Exception as e:
         return f"❌ 오류: {str(e)}"
 
-# Hugging Face 이미지 생성 (새로운 기능!)
-def generate_image_with_huggingface(prompt, negative_prompt=""):
+# Pollinations.ai 이미지 생성 (완전 무료, API 키 불필요)
+def generate_image_with_pollinations(prompt):
+    """
+    Pollinations.ai로 이미지 생성 (완전 무료, 빠름)
+    """
+    try:
+        # URL 인코딩
+        import urllib.parse
+        encoded_prompt = urllib.parse.quote(prompt)
+        
+        # Pollinations.ai API 호출
+        image_url = f"{POLLINATIONS_API_URL}{encoded_prompt}?width=512&height=512&nologo=true&enhance=true"
+        
+        response = requests.get(image_url, timeout=30)
+        
+        if response.status_code == 200:
+            # 이미지를 PIL로 열기
+            image = Image.open(BytesIO(response.content))
+            
+            # base64로 변환
+            buffered = BytesIO()
+            image.save(buffered, format="PNG")
+            img_base64 = base64.b64encode(buffered.getvalue()).decode()
+            
+            return img_base64, None
+        else:
+            return None, f"❌ Pollinations API 오류: HTTP {response.status_code}"
+            
+    except Exception as e:
+        return None, f"❌ Pollinations 오류: {str(e)}"
+
+# Hugging Face 이미지 생성 (디버깅 강화)
+def generate_image_with_huggingface(prompt, negative_prompt="", debug_mode=False):
     """
     Hugging Face Stable Diffusion으로 이미지 생성 (자동 폴백)
     """
     if not HUGGINGFACE_ENABLED:
         return None, "Hugging Face API 키가 설정되지 않았습니다."
     
+    debug_info = []
+    
     # 여러 모델 시도
     for model_idx, model_name in enumerate(HUGGINGFACE_MODELS):
         api_url = f"https://api-inference.huggingface.co/models/{model_name}"
+        
+        if debug_mode:
+            debug_info.append(f"시도 중: {model_name}")
         
         headers = {
             "Authorization": f"Bearer {HUGGINGFACE_API_KEY}",
@@ -176,7 +216,7 @@ def generate_image_with_huggingface(prompt, negative_prompt=""):
             "inputs": prompt,
             "parameters": {
                 "negative_prompt": negative_prompt,
-                "num_inference_steps": 25,  # 속도 개선
+                "num_inference_steps": 20,
                 "guidance_scale": 7.5,
             }
         }
@@ -186,95 +226,105 @@ def generate_image_with_huggingface(prompt, negative_prompt=""):
                 api_url,
                 headers=headers,
                 json=payload,
-                timeout=90
+                timeout=60
             )
+            
+            if debug_mode:
+                debug_info.append(f"  → 응답 코드: {response.status_code}")
+                debug_info.append(f"  → Content-Type: {response.headers.get('content-type', 'N/A')}")
             
             # 응답 상태 확인
             if response.status_code == 200:
-                # Content-Type 확인
                 content_type = response.headers.get('content-type', '')
                 
                 # 이미지 데이터인 경우
                 if 'image' in content_type or len(response.content) > 1000:
                     try:
                         image = Image.open(BytesIO(response.content))
-                        # PIL Image를 base64로 변환
                         buffered = BytesIO()
                         image.save(buffered, format="PNG")
                         img_base64 = base64.b64encode(buffered.getvalue()).decode()
                         
-                        # 성공 시 사용된 모델 정보 반환
+                        if debug_mode:
+                            debug_info.append(f"  ✅ 성공!")
+                            return img_base64, "\n".join(debug_info)
+                        
                         if model_idx > 0:
                             st.info(f"✅ 대체 모델 사용: {model_name}")
                         
                         return img_base64, None
                     except Exception as img_error:
-                        continue  # 다음 모델 시도
+                        if debug_mode:
+                            debug_info.append(f"  ❌ 이미지 변환 실패: {str(img_error)}")
+                        continue
                 else:
-                    # JSON 응답인 경우 (에러 메시지 등)
+                    # JSON 응답 확인
                     try:
                         error_data = response.json()
-                        error_msg = error_data.get('error', '알 수 없는 오류')
-                        # 다음 모델 시도
+                        if debug_mode:
+                            debug_info.append(f"  ❌ JSON 응답: {error_data}")
                         continue
                     except:
+                        if debug_mode:
+                            debug_info.append(f"  ❌ 예상치 못한 응답")
                         continue
             
             elif response.status_code == 503:
-                # 모델 로딩 중 - 대기 시간 확인
                 try:
                     error_data = response.json()
                     estimated_time = error_data.get('estimated_time', 20)
-                    if model_idx == len(HUGGINGFACE_MODELS) - 1:  # 마지막 모델
+                    if debug_mode:
+                        debug_info.append(f"  ⏳ 모델 로딩 중 (약 {estimated_time}초)")
+                    
+                    if model_idx == len(HUGGINGFACE_MODELS) - 1:
                         return None, f"⏳ 모델 로딩 중입니다. 약 {estimated_time}초 후 다시 시도해주세요."
                     else:
-                        continue  # 다음 모델 시도
+                        continue
                 except:
                     continue
             
             elif response.status_code == 404:
-                # 모델을 찾을 수 없음 - 다음 모델 시도
+                if debug_mode:
+                    debug_info.append(f"  ❌ 404: 모델을 찾을 수 없음")
                 continue
             
             elif response.status_code == 401:
-                # API 키 오류 - 모든 모델에 동일하게 적용되므로 즉시 반환
                 return None, "❌ API 키가 유효하지 않습니다. Secrets에서 HUGGINGFACE_API_KEY를 확인해주세요."
             
             elif response.status_code == 429:
-                # 사용 한도 초과
                 return None, "⚠️ API 사용 한도를 초과했습니다. 잠시 후 다시 시도해주세요."
             
             else:
-                # 기타 에러 - 다음 모델 시도
+                if debug_mode:
+                    try:
+                        error_data = response.json()
+                        debug_info.append(f"  ❌ 에러: {error_data.get('error', 'Unknown')}")
+                    except:
+                        debug_info.append(f"  ❌ HTTP {response.status_code}")
                 continue
                 
         except requests.exceptions.Timeout:
-            # 타임아웃 - 다음 모델 시도
+            if debug_mode:
+                debug_info.append(f"  ⏱️ 타임아웃")
             continue
         
         except requests.exceptions.ConnectionError:
             return None, "❌ 네트워크 연결 오류. 인터넷 연결을 확인해주세요."
         
         except Exception as e:
-            # 마지막 모델에서 실패하면 에러 반환
+            if debug_mode:
+                debug_info.append(f"  ❌ 예외: {str(e)}")
             if model_idx == len(HUGGINGFACE_MODELS) - 1:
+                if debug_mode:
+                    return None, "\n".join(debug_info)
                 return None, f"❌ 예상치 못한 오류: {str(e)}"
             continue
     
     # 모든 모델 실패
-    return None, """
-    ❌ 모든 모델에서 이미지 생성에 실패했습니다.
+    if debug_mode:
+        return None, "\n".join(debug_info)
     
-    **가능한 원인:**
-    1. Hugging Face API 무료 티어에서 해당 모델들이 제한되었을 수 있습니다
-    2. API 키가 올바르지 않을 수 있습니다
-    3. 일시적인 서버 문제일 수 있습니다
-    
-    **해결 방법:**
-    - API 키 확인: `hf_`로 시작하는지 확인
-    - 잠시 후 다시 시도
-    - Hugging Face 웹사이트에서 계정 상태 확인
-    """
+    return None, "❌ 모든 Hugging Face 모델에서 실패했습니다."
 
 def create_emotion_prompt_for_huggingface(emotion_summary, keywords):
     """
@@ -970,8 +1020,20 @@ with tab4:
                             if st.session_state.get('force_regenerate', False):
                                 st.session_state.force_regenerate = False
                             
-                            if HUGGINGFACE_ENABLED:
-                                with st.spinner("🎨 AI 이미지 생성 중... (여러 모델 시도 중, 최대 90초)"):
+                            # 이미지 생성 방법 선택
+                            generation_method = st.radio(
+                                "이미지 생성 방법",
+                                ["🌟 Pollinations (무료, 빠름, 추천)", "🤗 Hugging Face (API 키 필요)"],
+                                key="gen_method",
+                                horizontal=True
+                            )
+                            
+                            # 디버그 모드
+                            debug_mode = st.checkbox("🔧 디버그 모드", value=False, help="상세한 에러 정보 표시")
+                            
+                            if "Pollinations" in generation_method:
+                                # Pollinations.ai 사용 (무료, API 키 불필요)
+                                with st.spinner("🌟 Pollinations AI로 이미지 생성 중... (무료, 빠름)"):
                                     # 최근 일기에서 키워드 추출
                                     recent_keywords = []
                                     for item in items[-7:]:
@@ -985,17 +1047,17 @@ with tab4:
                                     
                                     # 프롬프트 미리보기
                                     with st.expander("🔍 생성 프롬프트 보기"):
-                                        st.code(f"Prompt: {prompt}\n\nNegative: {negative_prompt}")
-                                        st.caption(f"시도할 모델: {', '.join(HUGGINGFACE_MODELS)}")
+                                        st.code(f"Prompt: {prompt}")
+                                        st.info("📌 Pollinations.ai는 완전 무료이며 API 키가 필요없습니다!")
                                     
-                                    # 이미지 생성
-                                    img_base64, error = generate_image_with_huggingface(prompt, negative_prompt)
+                                    # Pollinations로 이미지 생성
+                                    img_base64, error = generate_image_with_pollinations(prompt)
                                     
                                     if img_base64:
                                         try:
                                             img_data = base64.b64decode(img_base64)
                                             st.success("✅ 이미지 생성 완료!")
-                                            st.image(img_data, caption="AI Generated Art", use_container_width=True)
+                                            st.image(img_data, caption="🌟 Pollinations AI 생성", use_container_width=True)
                                             
                                             # Google Sheets에 저장
                                             with st.spinner("💾 이미지 저장 중..."):
@@ -1017,30 +1079,83 @@ with tab4:
                                             st.error(f"❌ 이미지 처리 오류: {str(img_error)}")
                                     else:
                                         st.error(error if error else "이미지 생성 실패")
-                                        
-                                        # 디버깅 정보
-                                        with st.expander("🔧 문제 해결 가이드"):
-                                            st.markdown("""
-                                            **가능한 원인:**
-                                            1. **모델 로딩 중**: 20-30초 후 다시 시도
-                                            2. **API 키 오류**: Secrets에서 HUGGINGFACE_API_KEY 확인
-                                            3. **사용 한도 초과**: 잠시 후 재시도
-                                            4. **네트워크 오류**: 인터넷 연결 확인
-                                            
-                                            **API 키 확인:**
-                                            - Hugging Face 토큰은 `hf_`로 시작해야 합니다
-                                            - Settings → Access Tokens에서 생성
-                                            """)
+                            
                             else:
-                                st.warning("⚠️ Hugging Face API 키가 설정되지 않았습니다.")
-                                st.info("""
-                                **설정 방법:**
-                                1. Hugging Face (https://huggingface.co/) 가입
-                                2. Settings → Access Tokens → New Token
-                                3. Streamlit Cloud → Settings → Secrets
-                                4. `HUGGINGFACE_API_KEY = "hf_your_token"`
-                                """)
-                                st.code('HUGGINGFACE_API_KEY = "hf_..."', language="toml")
+                                # Hugging Face 사용
+                                if HUGGINGFACE_ENABLED:
+                                    with st.spinner("🤗 Hugging Face AI로 이미지 생성 중... (여러 모델 시도, 최대 60초)"):
+                                        # 최근 일기에서 키워드 추출
+                                        recent_keywords = []
+                                        for item in items[-7:]:
+                                            recent_keywords.extend(item['keywords'])
+                                        
+                                        # 프롬프트 생성
+                                        prompt, negative_prompt = create_emotion_prompt_for_huggingface(
+                                            emotions_summary, 
+                                            recent_keywords
+                                        )
+                                        
+                                        # 프롬프트 미리보기
+                                        with st.expander("🔍 생성 프롬프트 보기"):
+                                            st.code(f"Prompt: {prompt}\n\nNegative: {negative_prompt}")
+                                            st.caption(f"시도할 모델: {', '.join(HUGGINGFACE_MODELS)}")
+                                        
+                                        # 이미지 생성
+                                        img_base64, error = generate_image_with_huggingface(prompt, negative_prompt, debug_mode=debug_mode)
+                                        
+                                        if img_base64:
+                                            try:
+                                                img_data = base64.b64decode(img_base64)
+                                                st.success("✅ 이미지 생성 완료!")
+                                                
+                                                if debug_mode and error:
+                                                    with st.expander("🔍 디버그 정보"):
+                                                        st.code(error)
+                                                
+                                                st.image(img_data, caption="🤗 Hugging Face AI 생성", use_container_width=True)
+                                                
+                                                # Google Sheets에 저장
+                                                with st.spinner("💾 이미지 저장 중..."):
+                                                    if save_metaphor_image(sel_date, img_base64, prompt):
+                                                        st.success("💾 클라우드 저장 완료!")
+                                                    else:
+                                                        st.warning("⚠️ 클라우드 저장 실패 (이미지는 사용 가능)")
+                                                
+                                                # 다운로드 버튼
+                                                st.download_button(
+                                                    label="📥 이미지 다운로드",
+                                                    data=img_data,
+                                                    file_name=f"emotion_art_{sel_date}.png",
+                                                    mime="image/png",
+                                                    use_container_width=True,
+                                                    type="secondary"
+                                                )
+                                            except Exception as img_error:
+                                                st.error(f"❌ 이미지 처리 오류: {str(img_error)}")
+                                        else:
+                                            if debug_mode:
+                                                st.error("❌ 이미지 생성 실패")
+                                                with st.expander("🔍 상세 디버그 정보"):
+                                                    st.code(error if error else "알 수 없는 오류")
+                                            else:
+                                                st.error(error if error else "이미지 생성 실패")
+                                            
+                                            # 대안 제안
+                                            st.info("💡 **추천:** 위에서 'Pollinations (무료, 빠름)' 옵션을 선택해보세요!")
+                                else:
+                                    st.warning("⚠️ Hugging Face API 키가 설정되지 않았습니다.")
+                                    st.info("""
+                                    **옵션 1: Pollinations 사용 (추천)**
+                                    - 위에서 'Pollinations' 옵션 선택
+                                    - 완전 무료, API 키 불필요
+                                    
+                                    **옵션 2: Hugging Face 설정**
+                                    1. Hugging Face (https://huggingface.co/) 가입
+                                    2. Settings → Access Tokens → New Token
+                                    3. Streamlit Cloud → Settings → Secrets
+                                    4. `HUGGINGFACE_API_KEY = "hf_your_token"`
+                                    """)
+                                    st.code('HUGGINGFACE_API_KEY = "hf_..."', language="toml")
                     
                     result = get_expert_advice(name, data)
                     if result.get("has_content"):
@@ -1105,6 +1220,7 @@ st.markdown("### 💝 매일 감정 기록")
 footer_items = ["🤖 AI", "☁️ 클라우드"]
 if CLOVA_ENABLED:
     footer_items.append("🎤 클로버 95%")
+footer_items.append("🎨 Pollinations (무료)")
 if HUGGINGFACE_ENABLED:
-    footer_items.append("🎨 HF Image")
+    footer_items.append("🤗 HuggingFace")
 st.caption(" | ".join(footer_items))
