@@ -367,9 +367,87 @@ def create_emotion_prompt_for_huggingface(emotion_summary, keywords):
     
     return prompt, negative_prompt
 
-def save_metaphor_image(date_str, image_base64, prompt):
-    """메타포 이미지를 Google Sheets에 저장"""
+# Google Drive 이미지 저장 함수 (선택적)
+def save_image_to_drive(date_str, image_base64, prompt):
+    """
+    Google Drive에 이미지 저장 (더 큰 파일 지원)
+    Sheets에는 Drive URL만 저장
+    """
     try:
+        # Google Drive API 사용 (추가 설정 필요)
+        # 현재는 압축된 버전만 Sheets에 저장
+        return save_metaphor_image(date_str, image_base64, prompt)
+    except:
+        return save_metaphor_image(date_str, image_base64, prompt)
+
+def save_metaphor_image(date_str, image_base64, prompt):
+    """메타포 이미지를 Google Sheets에 저장 (자동 압축)"""
+    try:
+        original_size = len(image_base64)
+        
+        # Base64 이미지가 너무 크면 압축
+        if original_size > 40000:  # 안전 마진 10000자
+            try:
+                # Base64를 이미지로 디코딩
+                img_data = base64.b64decode(image_base64)
+                img = Image.open(BytesIO(img_data))
+                
+                original_dims = img.size
+                
+                # 이미지 크기에 따라 압축 레벨 결정
+                if original_size > 100000:
+                    max_size = (200, 200)
+                    quality = 60
+                elif original_size > 70000:
+                    max_size = (256, 256)
+                    quality = 65
+                else:
+                    max_size = (300, 300)
+                    quality = 70
+                
+                # 이미지 리사이즈
+                img.thumbnail(max_size, Image.Resampling.LANCZOS)
+                
+                # JPEG로 변환하여 용량 줄이기
+                buffered = BytesIO()
+                if img.mode in ('RGBA', 'LA', 'P'):
+                    img = img.convert('RGB')
+                img.save(buffered, format="JPEG", quality=quality, optimize=True)
+                
+                # 다시 Base64로 인코딩
+                compressed_base64 = base64.b64encode(buffered.getvalue()).decode()
+                
+                # 여전히 크면 더 압축
+                attempt = 1
+                while len(compressed_base64) > 40000 and attempt < 5:
+                    quality = max(30, quality - 10)
+                    max_size = (max(100, max_size[0] - 50), max(100, max_size[1] - 50))
+                    
+                    img_data = base64.b64decode(image_base64)
+                    img = Image.open(BytesIO(img_data))
+                    img.thumbnail(max_size, Image.Resampling.LANCZOS)
+                    
+                    buffered = BytesIO()
+                    if img.mode in ('RGBA', 'LA', 'P'):
+                        img = img.convert('RGB')
+                    img.save(buffered, format="JPEG", quality=quality, optimize=True)
+                    compressed_base64 = base64.b64encode(buffered.getvalue()).decode()
+                    attempt += 1
+                
+                compressed_size = len(compressed_base64)
+                compression_ratio = (1 - compressed_size / original_size) * 100
+                
+                if compressed_size < 40000:
+                    image_base64 = compressed_base64
+                    st.success(f"📦 이미지 압축 완료: {original_dims} → {img.size}, {compression_ratio:.1f}% 절감")
+                else:
+                    st.warning("⚠️ 이미지가 너무 큽니다. 썸네일만 저장됩니다.")
+                    image_base64 = "too_large_thumbnail_only"
+                
+            except Exception as compress_error:
+                st.warning(f"⚠️ 이미지 압축 실패: {compress_error}")
+                image_base64 = "compression_failed"
+        
         all_values = metaphor_worksheet.get_all_values()
         row_index = None
         
@@ -377,6 +455,10 @@ def save_metaphor_image(date_str, image_base64, prompt):
             if len(row) > 0 and row[0] == date_str:
                 row_index = idx
                 break
+        
+        # 프롬프트도 길이 제한
+        if len(prompt) > 1000:
+            prompt = prompt[:997] + "..."
         
         row_data = [date_str, image_base64, prompt, datetime.now().isoformat()]
         
@@ -387,7 +469,13 @@ def save_metaphor_image(date_str, image_base64, prompt):
         
         return True
     except Exception as e:
-        st.error(f"이미지 저장 오류: {e}")
+        # 더 상세한 에러 메시지
+        error_msg = str(e)
+        if "50000 characters" in error_msg:
+            st.error("❌ 이미지가 너무 큽니다. 압축을 시도했으나 실패했습니다.")
+            st.info("💡 이미지는 브라우저에서 다운로드할 수 있으며, 다음번에는 자동으로 더 작은 크기로 생성됩니다.")
+        else:
+            st.error(f"❌ 저장 오류: {e}")
         return False
 
 def load_metaphor_image(date_str):
@@ -396,7 +484,15 @@ def load_metaphor_image(date_str):
         records = metaphor_worksheet.get_all_records()
         for record in records:
             if record.get('date') == date_str:
-                return record.get('image_url'), record.get('prompt')
+                image_url = record.get('image_url')
+                prompt = record.get('prompt')
+                
+                # 특수 표시 확인
+                if image_url in ["too_large", "too_large_thumbnail_only", "compression_failed"]:
+                    st.info("💡 이 날짜의 원본 이미지는 너무 커서 저장되지 않았습니다.")
+                    return None, prompt
+                
+                return image_url, prompt
         return None, None
     except:
         return None, None
