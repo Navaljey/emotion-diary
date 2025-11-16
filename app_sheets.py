@@ -848,6 +848,80 @@ def calc_total_score(item):
 
 # 메인 화면
 st.title("📱 감정 일기")
+
+# 🔍 클로바 API 상태 진단
+with st.expander("🔧 클로바 API 진단", expanded=True):
+    st.markdown("### 🔍 현재 상태")
+    
+    # 1. 환경 확인
+    st.write(f"**실행 환경:** {'Streamlit Cloud' if 'secrets' in dir(st) else '로컬'}")
+    
+    # 2. API 키 존재 여부
+    col1, col2 = st.columns(2)
+    with col1:
+        if NAVER_CLIENT_ID:
+            st.success(f"✅ CLIENT_ID: {len(NAVER_CLIENT_ID)}자")
+        else:
+            st.error("❌ CLIENT_ID 없음")
+    
+    with col2:
+        if NAVER_CLIENT_SECRET:
+            st.success(f"✅ CLIENT_SECRET: {len(NAVER_CLIENT_SECRET)}자")
+        else:
+            st.error("❌ CLIENT_SECRET 없음")
+    
+    # 3. 클로바 활성화 상태
+    st.divider()
+    if CLOVA_ENABLED:
+        st.success("✅ **클로바 API 활성화됨!** 음성 입력 사용 가능")
+    else:
+        st.error("❌ **클로바 API 비활성화됨!** 음성 입력 사용 불가")
+        
+        st.markdown("### 🛠️ 해결 방법")
+        
+        # Streamlit Cloud인 경우
+        if 'secrets' in dir(st):
+            st.info("""
+            **Streamlit Cloud 설정:**
+            1. 우측 상단 [⚙️ Settings] 클릭
+            2. [Secrets] 탭 선택
+            3. 다음 내용 추가:
+            """)
+            st.code("""NAVER_CLIENT_ID = "your_client_id_here"
+NAVER_CLIENT_SECRET = "your_client_secret_here"
+GEMINI_API_KEY = "your_gemini_key_here"
+SPREADSHEET_ID = "your_spreadsheet_id"
+
+[gcp_service_account]
+# ... (기존 Google Cloud 설정)
+""", language="toml")
+        else:
+            # 로컬 환경
+            st.info("""
+            **로컬 환경 설정:**
+            프로젝트 폴더에 `.env` 파일 생성 후:
+            """)
+            st.code("""NAVER_CLIENT_ID=your_client_id_here
+NAVER_CLIENT_SECRET=your_client_secret_here
+GEMINI_API_KEY=your_gemini_key_here""", language="bash")
+        
+        st.markdown("### 📋 네이버 클라우드 API 키 발급")
+        st.markdown("""
+        1. [네이버 클라우드 플랫폼](https://console.ncloud.com/) 접속
+        2. 로그인 후 **[Services]** → **[AI·NAVER API]**
+        3. **[CLOVA Speech Recognition (CSR)]** 선택
+        4. **[이용 신청하기]** 클릭
+        5. **[마이페이지]** → **[인증키 관리]**에서 키 확인
+        """)
+        
+        st.warning("⚠️ 키 설정 후 반드시 앱을 재시작하세요! (Settings → Reboot app)")
+    
+    # 4. 테스트 버튼
+    if CLOVA_ENABLED:
+        st.divider()
+        st.markdown("### 🧪 API 연결 테스트")
+        st.info("아래 '✍️ 쓰기' 탭에서 음성을 녹음하고 '📝 변환' 버튼을 눌러 실제 작동을 확인하세요.")
+
 api_status = []
 if CLOVA_ENABLED:
     api_status.append("🎤 클로버 95%")
@@ -1320,3 +1394,4 @@ footer_items.append("🎨 Pollinations (무료)")
 if HUGGINGFACE_ENABLED:
     footer_items.append("🤗 HuggingFace")
 st.caption(" | ".join(footer_items))
+
