@@ -932,6 +932,8 @@ st.caption(status_text)
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["✍️ 쓰기", "📊 통계", "📈 그래프", "👨‍⚕️ 전문가", "📊 비교"])
 
+# app_sheets.py의 130번째 줄 근처 (with tab1: 섹션) 전체를 이 코드로 교체하세요
+
 with tab1:
     st.subheader("오늘의 마음")
     data, items = get_latest_data()
@@ -965,35 +967,61 @@ with tab1:
                         if not text.startswith("❌"):
                             st.success("✅ 완료!")
                             st.session_state.voice_text = text
+                            # ✅ 변환 성공 시 날짜별로 세션 키 저장
+                            st.session_state[f'voice_for_{date_str}'] = text
                             st.rerun()
                         else:
                             st.error(text)
         
+        # 변환된 텍스트 표시
         if 'voice_text' in st.session_state and st.session_state.voice_text:
             st.success(f"🎤 {st.session_state.voice_text}")
             col_a, col_c = st.columns(2)
             with col_a:
                 if st.button("📋 추가", use_container_width=True):
+                    # ✅ 추가 버튼: 플래그만 설정하고 텍스트는 유지
                     st.session_state.append_voice = True
                     st.rerun()
             with col_c:
                 if st.button("🗑️ 지우기", use_container_width=True):
+                    # 세션에서 음성 텍스트 완전히 제거
                     st.session_state.voice_text = ""
+                    if f'voice_for_{date_str}' in st.session_state:
+                        del st.session_state[f'voice_for_{date_str}']
+                    if 'append_voice' in st.session_state:
+                        del st.session_state['append_voice']
                     st.rerun()
     
     st.divider()
     
-    # 텍스트 입력
+    # 텍스트 입력란의 기본값 설정
     default_content = ""
-    if 'append_voice' in st.session_state and st.session_state.append_voice and 'voice_text' in st.session_state:
-        default_content = (data[date_str]["content"] + "\n\n" if diary_exists else "") + st.session_state.voice_text
-        st.session_state.append_voice = False
-        st.session_state.voice_text = ""
-    elif diary_exists:
-        default_content = data[date_str]["content"]
     
-    content = st.text_area("📝 오늘 하루는?", value=default_content, height=200, placeholder="입력 또는 음성...")
+    # ✅ 수정된 로직: 추가 버튼을 눌렀을 때만 텍스트 결합
+    if 'append_voice' in st.session_state and st.session_state.append_voice:
+        if 'voice_text' in st.session_state and st.session_state.voice_text:
+            # 기존 일기가 있으면 뒤에 추가, 없으면 새로 시작
+            existing_content = data[date_str]["content"] if diary_exists else ""
+            default_content = existing_content + ("\n\n" if existing_content else "") + st.session_state.voice_text
+            
+            # ✅ 추가 완료 후 플래그만 제거 (음성 텍스트는 유지하여 다시 추가 가능)
+            st.session_state.append_voice = False
+        else:
+            default_content = data[date_str]["content"] if diary_exists else ""
+    else:
+        # 추가 버튼을 안 눌렀으면 기존 일기 내용만 표시
+        default_content = data[date_str]["content"] if diary_exists else ""
     
+    # 텍스트 입력란
+    content = st.text_area(
+        "📝 오늘 하루는?", 
+        value=default_content, 
+        height=200, 
+        placeholder="입력 또는 음성...",
+        key=f"diary_content_{date_str}"  # ✅ 날짜별로 고유 키 사용
+    )
+    
+    # 저장 및 삭제 버튼
     col1, col2 = st.columns([3, 1])
     with col1:
         save_clicked = st.button("💾 저장", type="primary", use_container_width=True)
@@ -1004,8 +1032,12 @@ with tab1:
                 st.rerun()
         else:
             if st.button("🗑️", help="지우기"):
+                # 입력란 초기화
+                if f'voice_for_{date_str}' in st.session_state:
+                    del st.session_state[f'voice_for_{date_str}']
                 st.rerun()
     
+    # 삭제 확인
     if 'confirm_delete' in st.session_state and st.session_state.confirm_delete:
         st.warning(f"⚠️ {st.session_state.confirm_delete} 삭제?")
         col_y, col_n = st.columns(2)
@@ -1021,39 +1053,65 @@ with tab1:
                 st.rerun()
         save_clicked = False
     
+    # 💾 저장 처리
     if save_clicked:
         if content.strip():
             with st.spinner('🤖 분석 중...'):
                 analyzed = sentiment_analysis(content)
                 data, items = get_latest_data()
                 
-                today_data = {"date": date_str, "keywords": analyzed["keywords"], "joy": analyzed["joy"], 
-                             "sadness": analyzed["sadness"], "anger": analyzed["anger"], 
-                             "anxiety": analyzed["anxiety"], "calmness": analyzed["calmness"]}
+                today_data = {
+                    "date": date_str, 
+                    "keywords": analyzed["keywords"], 
+                    "joy": analyzed["joy"], 
+                    "sadness": analyzed["sadness"], 
+                    "anger": analyzed["anger"], 
+                    "anxiety": analyzed["anxiety"], 
+                    "calmness": analyzed["calmness"]
+                }
                 
-                recent_data = [{"date": i["date"], "keywords": i["keywords"], "joy": i["joy"], 
-                               "sadness": i["sadness"], "anger": i["anger"], "anxiety": i["anxiety"], 
-                               "calmness": i["calmness"]} for i in items[-7:]]
+                recent_data = [{
+                    "date": i["date"], 
+                    "keywords": i["keywords"], 
+                    "joy": i["joy"], 
+                    "sadness": i["sadness"], 
+                    "anger": i["anger"], 
+                    "anxiety": i["anxiety"], 
+                    "calmness": i["calmness"]
+                } for i in items[-7:]]
                 
                 message = generate_message(today_data, recent_data)
                 
                 new_item = {
-                    "date": date_str, "content": content, "keywords": analyzed["keywords"],
+                    "date": date_str, 
+                    "content": content, 
+                    "keywords": analyzed["keywords"],
                     "total_score": calc_total_score(analyzed),
-                    "joy": analyzed["joy"], "sadness": analyzed["sadness"],
-                    "anger": analyzed["anger"], "anxiety": analyzed["anxiety"],
-                    "calmness": analyzed["calmness"], "message": message
+                    "joy": analyzed["joy"], 
+                    "sadness": analyzed["sadness"],
+                    "anger": analyzed["anger"], 
+                    "anxiety": analyzed["anxiety"],
+                    "calmness": analyzed["calmness"], 
+                    "message": message
                 }
                 
                 if save_data_to_sheets(date_str, new_item):
                     st.success("✅ 저장!")
                     st.balloons()
+                    
+                    # ✅ 저장 성공 후 음성 텍스트 세션 정리
                     if 'voice_text' in st.session_state:
                         del st.session_state.voice_text
+                    if f'voice_for_{date_str}' in st.session_state:
+                        del st.session_state[f'voice_for_{date_str}']
+                    if 'append_voice' in st.session_state:
+                        del st.session_state['append_voice']
+                    
                     st.rerun()
         else:
             st.warning("⚠️ 내용 입력!")
     
+    # 일기 정보 표시
     if 'confirm_delete' not in st.session_state:
         st.divider()
         if diary_exists:
@@ -1064,16 +1122,21 @@ with tab1:
             st.markdown(f"### 🎯 점수: **:{color}[{ts}/10]** {emoji}")
             st.write("**🎭 세부:**")
             cols = st.columns(5)
-            for i, (e, n, s) in enumerate([("😄", "기쁨", item["joy"]), ("😢", "슬픔", item["sadness"]), 
-                                           ("😡", "분노", item["anger"]), ("😰", "불안", item["anxiety"]), 
-                                           ("😌", "평온", item["calmness"])]):
+            emotions = [
+                ("😄", "기쁨", item["joy"]), 
+                ("😢", "슬픔", item["sadness"]), 
+                ("😡", "분노", item["anger"]), 
+                ("😰", "불안", item["anxiety"]), 
+                ("😌", "평온", item["calmness"])
+            ]
+            for i, (e, n, s) in enumerate(emotions):
                 with cols[i]:
                     st.metric(f"{e} {n}", f"{s}")
             if item["message"]:
                 st.success(f"💌 {item['message']}")
         else:
             st.info("💡 일기를 쓰면 AI가 분석!")
-
+            
 with tab2:
     st.subheader("📊 통계")
     data, items = get_latest_data()
@@ -1394,4 +1457,5 @@ footer_items.append("🎨 Pollinations (무료)")
 if HUGGINGFACE_ENABLED:
     footer_items.append("🤗 HuggingFace")
 st.caption(" | ".join(footer_items))
+
 
